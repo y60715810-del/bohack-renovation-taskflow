@@ -5,14 +5,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#13294b">
   <title>工序共识 · 四方家装协作</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Noto+Serif+SC:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/app.css?v=blue-white-1">
-  <script src="/static/app.js?v=blue-white-1" defer></script>
+  <link rel="preload" as="image" href="/static/images/material-study.webp">
+  <link rel="stylesheet" href="/static/app.css?v=calm-blue-2">
+  <link rel="stylesheet" href="/static/design.css?v=calm-blue-2">
+  <script src="/static/app.js?v=calm-blue-2" defer></script>
+  <script type="module" src="/static/motion.js?v=calm-blue-2"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
   <div id="app"><div class="loading">正在连接工序共识…</div></div>
+  <dialog id="collaboration-story" aria-labelledby="story-title" aria-describedby="story-description">
+    <div class="story-dialog-head"><div><p class="eyebrow">四方一起，把家落到实处</p><h2 id="story-title">共同确认，一步一步交付</h2></div><button type="button" class="secondary" data-close-story>关闭演示</button></div>
+    <p id="story-description">住户提出需求，设计与施工补充依据，中介组织确认。各方确认后，再发布执行。</p>
+    <div id="story-scene"></div>
+  </dialog>
   <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>

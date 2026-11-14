@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: taskflow-preview
+    runtime: docker
+    plan: free
+    branch: main
+    autoDeployTrigger: commit
+    healthCheckPath: /api/health
+    envVars:
+      - key: TASKFLOW_TRUST_PROXY
+        value: "1"
+      - key: TASKFLOW_SECURE_COOKIE
+        value: "1"

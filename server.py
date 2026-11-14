@@ -31,6 +31,8 @@ def create_app(data_dir=None, demo_access=False):
     public_demo_host = os.getenv('TASKFLOW_PUBLIC_DEMO_HOST', '')
     if public_demo_host:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    elif os.getenv('TASKFLOW_TRUST_PROXY') == '1':
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     app.json.ensure_ascii = False
     app.config.update(MAX_CONTENT_LENGTH=10 * 1024 * 1024, MAX_FORM_PARTS=12)
     folder = Path(data_dir or os.getenv('TASKFLOW_DATA_DIR', str(ROOT / 'instance')))
@@ -129,6 +131,14 @@ def create_app(data_dir=None, demo_access=False):
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        # Only the local, standalone collaboration illustration may be framed.
+        # Swarm creates a shadow-root stylesheet; allow its inline styles here only.
+        if request.path == '/static/collaboration-scene.html':
+            response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+            response.headers['Content-Security-Policy'] = (
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "connect-src 'none'; img-src 'self' data:; object-src 'none'; "
+                "frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
         if request.path.startswith('/api/'):
             response.headers['Cache-Control'] = 'no-store'
         return response
@@ -783,5 +793,8 @@ if __name__ == '__main__':
             raise SystemExit('Public demo requires a loopback-only backend.')
         proxy = {'trusted_proxy':'127.0.0.1',
                  'trusted_proxy_headers':{'x-forwarded-for','x-forwarded-proto','x-forwarded-host'}}
+    elif os.getenv('TASKFLOW_TRUST_PROXY') == '1':
+        proxy = {'trusted_proxy': '*',
+                 'trusted_proxy_headers': {'x-forwarded-for', 'x-forwarded-proto'}}
     serve(create_app(demo_access=demo_access), host=host, port=port, threads=8,
           max_request_body_size=10 * 1024 * 1024, **proxy)
