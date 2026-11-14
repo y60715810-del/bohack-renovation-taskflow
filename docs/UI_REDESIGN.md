@@ -1,31 +1,29 @@
-# 蓝白界面与协作演示
+# 共序·港乡：直接体验与交互开场
 
-本次按 UI/UX Pro Max 的信息层级、留白、可读性和减少动态效果建议统一界面。用户指定蓝白配色；不采用检索结果中默认的暖灰金配色或滚动叙事效果。Lusano 首页在当前环境被网络白名单拦截（403），因此没有声称逐项复刻其实际页面。
+默认入口改为交互开场，不再出现登录注册表单。产品名、页面标题、共享协议单和启动提示统一为「共序·港乡」。按 UI/UX Pro Max 的层级、留白、可读性和减少动态效果建议保持蓝白视觉。
 
-## 设计约束
+## 开场与产品功能
 
-- 白色入口、深蓝文字、雾蓝辅助色；无背景网格、漂浮装饰、渐变卡片。
-- 首页标题与材质图形成视觉焦点，登录注册入口直接可见。工作区保持原有路由、权限、表单和业务入口，统一阅读间距及控件状态。
-- `static/images/material-study.webp` 是生成的材质示意图（浅蓝陶砖、洞石、木纹），不是项目施工证据；页面有明确标注。图片与字体均无需外部服务。
-- `static/design.css` 是统一视觉层，`static/app.css` 保留基础布局与业务组件样式，已删除原先重复的主题覆盖层。
+- 可点击「需求、方案、共识、交付」四个步骤查看说明；不是自动轮播，不阻止进入产品。
+- 可先选项目经理、住户、设计师或施工团队；首次选择非经理身份时，后台自动准备同一份四方案例，不要求用户先注册经理账号。
+- 点击「进入协作现场」或「跳过开场，直接进入」进入原有产品工作区；四种身份和项目总览、排程、协商、施工照片、成员、记录入口保持可用。
+- 刷新沿用已有浏览器的身份与案例；「返回开场」回到身份选择，不删除案例。
+- 本地材质图为生成示意，页面标注「非项目现场」，不得作为施工照片证据。
+- 两个外部参考站点在当前环境均被网络策略拦截（403）；实现基于用户给出的简洁交互、蓝白材质和保留功能要求，未声称逐项复刻原站。
 
 ## Swarm Rebuild
 
-真实接入 `swarm-rebuild@0.2.4` 的官方 ESM 构建，零运行时依赖。代码与 MIT 许可保存在 `static/vendor/swarm-rebuild/`。npm 下载包的 SHA-512 已按 registry integrity 核验：
+真实使用 `swarm-rebuild@0.2.4` 官方 ESM 构建。仅在用户主动打开协作说明并点击播放后运行，光标限制为单色。动效在独立同源示意页面内运行，不覆盖实际业务页面。关闭或播放完成后销毁；系统要求减少动态效果时只显示静态说明。
+
+代码与 MIT 许可在 `static/vendor/swarm-rebuild/`；来自 https://github.com/MaximeBoulle/Swarm-Rebuild 。下载包已核验 npm SHA-512：
 
 ```
 sha512-qktBNuvOn3mWNv2ZMwJ4sZe/tfaqFOiCIVYU56VKAu3GRFCfmTud0w2mScjJXF5Ofyj/8oyyQLsgs3diColNKA==
 ```
 
-来源：https://github.com/MaximeBoulle/Swarm-Rebuild
-
-入口「了解四方如何协作」先显示静态、可阅读的流程；用户主动点击「播放协作构建」才运行重建动画。彩色光标被限制为单色，关闭或完成后销毁动效；不自动滚动、不覆盖实际登录或审批页面。系统启用 `prefers-reduced-motion` 时不显示播放入口。关闭弹窗会释放 iframe 并将焦点还给入口。
-
-动效运行在同源的独立示意页面。只有 `/static/collaboration-scene.html` 使用 `SAMEORIGIN` 与 `frame-ancestors 'self'`；此页禁用网络连接与表单提交，为动效引擎的样式注入允许内联样式。主应用继续禁止嵌入，且未放宽其 CSP。
+只有 `/static/collaboration-scene.html` 允许同源嵌入与引擎所需的内联样式；该示意页禁止网络连接、表单和非同源嵌入，主应用 CSP 保持严格。
 
 ## 验证
-
-自动测试：
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
@@ -34,26 +32,20 @@ node --check static/motion.js
 node --check static/collaboration-scene.js
 ```
 
-29 项测试，包括原有 28 项业务/权限测试和新增的动效页面安全头隔离测试。
+现有业务规则、权限、版本冲突、任务、照片与验收测试保持运行。新增测试覆盖公开直接体验的 HTTPS/域名校验、禁用账号入口及浏览器案例隔离。
 
-浏览器回归脚本使用 Playwright 和系统 Chromium。**只能对临时测试数据库运行**：脚本会注册合成账号、创建项目及邀请码，另会创建独立演示案例。不要指向实际项目数据库。
-
-两个独立终端分别启动普通测试服务和演示测试服务（两者均使用临时目录）：
+实际浏览器回归需要已有 Playwright 和 `/usr/bin/chromium`，必须对临时数据目录运行：
 
 ```sh
-TASKFLOW_HOST=127.0.0.1 TASKFLOW_PORT=18774 TASKFLOW_DATA_DIR=/tmp/taskflow-ui-normal .venv/bin/python server.py
+TASKFLOW_HOST=127.0.0.1 TASKFLOW_PORT=18777 TASKFLOW_DEMO_ACCESS=1 TASKFLOW_KITCHEN_DEMO=1 TASKFLOW_DATA_DIR=/tmp/gangxiang-ui-check .venv/bin/python server.py
 ```
+
+另一个终端执行：
 
 ```sh
-TASKFLOW_HOST=127.0.0.1 TASKFLOW_PORT=18775 TASKFLOW_DATA_DIR=/tmp/taskflow-ui-demo TASKFLOW_DEMO_ACCESS=1 TASKFLOW_KITCHEN_DEMO=1 .venv/bin/python server.py
+python3 tests/ui_smoke.py --app-url http://127.0.0.1:18777 --artifacts-dir /tmp/gangxiang-ui-artifacts
 ```
 
-再运行（运行环境的 Python 需要已有 Playwright，Chromium 路径为 `/usr/bin/chromium`）：
+覆盖四个开场步骤、无密码表单、住户先进入、四种身份共用一个案例、六个业务页、375/768/1440 宽度、Swarm 加载与关闭、焦点恢复、Escape、减少动态效果、刷新、返回开场及不同浏览器的案例隔离。截图保存在指定目录。脚本会创建合成案例，不要指向实际业务数据。
 
-```sh
-python3 tests/ui_smoke.py --app-url http://127.0.0.1:18774 --demo-url http://127.0.0.1:18775 --artifacts-dir /tmp/taskflow-ui-artifacts
-```
-
-覆盖登录/注册切换、实际注册、创建项目、生成邀请、退出与重新登录、四种身份与六个工作区页面、375/768/1440 像素布局、Swarm 真实加载、播放中关闭、焦点恢复、Escape 和减少动态效果。测试同时收集前端异常，截图写入指定目录。
-
-此外，修复了已有前端的模板字符串语法错误、`isApproved` 缺失、邀请下拉框未闭合、排程表单多余闭合标签，以及无待上传任务时访问不存在属性的问题。业务审批规则与后端功能保持原样。
+Windows 启动脚本已检查完整解压的 `requirements.txt`，避免只从 ZIP 内启动而缺少依赖清单。Linux 和容器的真实启动已独立验证；Windows 脚本需在 Windows 上执行。

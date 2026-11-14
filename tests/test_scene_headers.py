@@ -37,3 +37,29 @@ class PreviewProxyTest(unittest.TestCase):
                     self.assertEqual(response.status_code, expected)
                     if trust == '1':
                         self.assertIn('Secure', response.headers['Set-Cookie'])
+
+
+class DirectPublicPreviewTest(unittest.TestCase):
+    def test_render_preview_uses_browser_isolated_demo_without_account_routes(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+            'TASKFLOW_PUBLIC_PREVIEW': '1',
+            'RENDER_EXTERNAL_HOSTNAME': 'preview.example',
+            'TASKFLOW_PUBLIC_DEMO_HOST': '',
+            'TASKFLOW_TRUST_PROXY': '1',
+        }):
+            client = create_app(directory, demo_access=True).test_client()
+            base = 'https://preview.example'
+            status = client.get('/api/demo-access', base_url=base)
+            self.assertTrue(status.get_json()['available'])
+            login = client.post('/api/demo-login', base_url=base, json={'role': 'coordinator'})
+            self.assertEqual(login.status_code, 200)
+            project = client.post('/api/projects/demo', base_url=base, json={},
+                                  headers={'X-CSRF-Token': login.get_json()['csrf']})
+            self.assertEqual(project.status_code, 201)
+            self.assertEqual(len(project.get_json()['members']), 4)
+            self.assertEqual(client.get('/api/demo-access', base_url='https://wrong.example').status_code, 403)
+            self.assertEqual(client.get('/api/demo-access', base_url='http://preview.example').status_code, 403)
+            self.assertEqual(client.post('/api/register', base_url=base, json={}).status_code, 403)
+            self.assertEqual(client.post('/api/login', base_url=base, json={}).status_code, 403)
+            outsider = create_app(directory, demo_access=True).test_client()
+            self.assertFalse(outsider.get('/api/demo-access', base_url=base).get_json()['ready'])

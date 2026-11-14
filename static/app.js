@@ -8,7 +8,7 @@ const fieldLabels = c => ({
   ...templateFor(c).design,
   ...Object.fromEntries(Object.entries(labels).filter(([key]) => !Object.hasOwn(state.project.templates.tiles.design, key)))
 });
-const state = {user:null,csrf:'',projects:[],project:null,tab:'overview',changeId:null,register:false,dirty:false,pending:false};
+const state = {user:null,csrf:'',projects:[],project:null,tab:'overview',changeId:null,entryRole:'coordinator',entryStage:0,dirty:false,pending:false};
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -93,25 +93,41 @@ function demoHeroTiles(){
   return Object.entries(demoRoles).map(([role,description])=>`<button type="button" data-demo-role="${role}" ${!state.demo.ready&&role!=='coordinator'?'disabled':''}><strong>${esc(roles[role])}</strong><small>${description}</small></button>`).join('');
 }
 
+const entryStages=[
+  {title:'说出需求',label:'需求',role:'住户',text:'把想要的家说明白，原话始终保留。',note:'从一个想法开始，让四方看见同一份需求。'},
+  {title:'完善方案',label:'方案',role:'设计与施工',text:'图纸、材料、报价和日期，逐项核对。',note:'每一项调整，都有能一起核对的依据。'},
+  {title:'共同确认',label:'共识',role:'中介协调',text:'各方确认同一版本，再发布正式排程。',note:'让设计、施工和住户，站在同一页上。'},
+  {title:'有序交付',label:'交付',role:'四方协作',text:'施工留痕、任务确认，最终由住户验收。',note:'从图纸走向现场，每一步都有人负责。'}
+];
+const entryRoleNames={coordinator:'项目经理',owner:'住户',designer:'设计师',contractor:'施工团队'};
 function entryHeader(){
-  return `<header class="entry-header"><a class="entry-brand" href="/" aria-label="工序共识首页"><span class="brand-symbol" aria-hidden="true">共</span><span>工序共识<small>家装四方协作</small></span></a><a class="entry-nav" href="#entry-access">进入协作 <span aria-hidden="true">↗</span></a></header>`;
+  return `<header class="entry-header"><a class="entry-brand" href="/" aria-label="共序·港乡首页"><span class="brand-symbol" aria-hidden="true">共</span><span>共序·港乡<small>共识有据 · 交付有序</small></span></a><button class="entry-nav entry-skip" type="button" data-enter-product aria-label="跳过开场，直接进入"><span class="entry-skip-label">跳过开场，直接进入</span> <span aria-hidden="true">↗</span></button></header>`;
 }
-function materialStory(){
-  return `<section class="entry-story" aria-labelledby="entry-title"><p class="eyebrow">从一个想法，到共同交付</p><h1 id="entry-title">让家的每一步，<br>都<span>心中有数。</span></h1><p class="entry-lead">从设计图纸到现场交付，<br>把需求、方案与确认，放在同一份记录里。</p><button class="story-link" type="button" data-open-story>了解四方如何协作 <span aria-hidden="true">↗</span></button><figure class="material-study"><img src="/static/images/material-study.webp" width="1536" height="1024" alt="浅蓝陶砖、米白洞石与浅色木纹组成的装修材质示意" fetchpriority="high"><figcaption><span>MATERIAL & CONSENSUS</span><span>材质示意 · 非项目现场</span></figcaption></figure><div class="entry-principle"><span aria-hidden="true">01 — 04</span><p>住户、设计、施工与中介，<br>一起确认，再向前一步。</p></div></section>`;
+function openingPage(){
+  const selected=state.entryRole||'coordinator',stage=state.entryStage||0,item=entryStages[stage];
+  const available=state.demo?.available;
+  return `<div class="entry-page direct-entry">${entryHeader()}<main id="main-content" class="opening-layout"><section class="opening-copy" aria-labelledby="entry-title"><p class="eyebrow">共序·港乡 / 四方家装协作</p><h1 id="entry-title">让家的每一步，<br>都有<span>共同的方向。</span></h1><p class="entry-lead">从一句想法，到一份方案，再到现场交付。<br>住户、设计、施工与中介，在同一个现场协作。</p><div class="opening-flow" aria-label="探索协作过程">${entryStages.map((x,i)=>`<button type="button" data-entry-stage="${i}" aria-pressed="${i===stage}"><span>0${i+1}</span>${x.label}</button>`).join('')}</div><div class="opening-flow-note" aria-live="polite" aria-atomic="true"><h2 id="entry-stage-title">${item.title}</h2><p id="entry-stage-text">${item.text}</p></div><button class="story-link" type="button" data-open-story>看看四方如何协作 <span aria-hidden="true">↗</span></button></section><figure class="opening-visual"><div class="opening-image"><img src="/static/images/material-study.webp" width="1536" height="1024" alt="浅蓝陶砖、洞石与木纹组成的装修材质示意" fetchpriority="high"><span class="material-label">蓝白之间，家的共识。</span></div><figcaption><span>材质示意 · 非项目现场</span><span id="entry-stage-note">${item.note}</span></figcaption></figure><section class="entry-launch" aria-labelledby="entry-role-title"><div class="entry-launch-head"><div><p class="eyebrow">四方同场，各有角色</p><h2 id="entry-role-title">从你的视角，走进协作。</h2></div><p>选择身份即可体验，进入后也能随时切换。</p></div><div class="entry-role-options" role="group" aria-label="选择体验身份">${Object.entries(demoRoles).map(([role,description],i)=>`<button type="button" data-entry-role="${role}" aria-pressed="${role===selected}"><span class="role-index" aria-hidden="true">0${i+1}</span><strong>${entryRoleNames[role]}</strong><small>${description}</small><span class="role-check" aria-hidden="true">${role===selected?'✓':'↗'}</span></button>`).join('')}</div><div class="entry-launch-bottom"><p id="entry-role-hint" aria-live="polite">以${entryRoleNames[selected]}视角进入，同一份案例、同一份记录。</p><button type="button" class="enter-product" data-enter-product ${available?'':'disabled'}>${available?'进入协作现场':'协作服务尚未连接'} <span aria-hidden="true">↗</span></button></div>${available?'':'<p class="notice error">请使用新版 start.cmd 启动；已有部署请开启直接体验模式。<button type="button" class="link" id="retryConnection">重新连接</button></p>'}</section></main><footer class="entry-footer"><span>共序·港乡 · 把每一步，交给共同的共识。</span><span>需求 · 方案 · 确认 · 交付</span></footer></div>`;
 }
-function entryFooter(){
-  return `<footer class="entry-footer"><span>有依据地协作，有共识地交付。</span><span>需求 · 方案 · 确认 · 交付</span></footer>`;
-}
-function authPage(){
-  const isDemo=state.demo?.available&&!state.accountLogin&&!location.hash.startsWith('#join=');
-  const invite=new URLSearchParams(location.hash.slice(1)).get('join');
-  const access=isDemo?`<section class="auth-main" id="entry-access" aria-labelledby="access-title"><div class="auth-box"><p class="eyebrow">共享一个协作现场</p><h2 id="access-title">从你的身份开始</h2><p class="muted">${state.demo.ready?'选择身份，继续同一个演示案例。':'先由中介方创建案例，再体验其他三方的协作。'}</p><div class="hero-tiles">${demoHeroTiles()}</div><div class="hero-foot"><button class="secondary" id="accountLogin">使用账号登录</button><small>演示进度会保留在当前浏览器中。</small></div></div></section>`:
-    `<section class="auth-main" id="entry-access" aria-labelledby="access-title"><div class="auth-box"><p class="eyebrow">你的项目，始终同步</p><h2 id="access-title">${state.register?'开启一段新的协作':'回到你的项目'}</h2><p class="muted">各方使用自己的账号，共享同一份项目记录。</p>${invite?'<div class="notice">你已打开项目邀请。登录后可使用邀请码加入。</div>':''}<div class="auth-tabs" role="group" aria-label="账号操作"><button type="button" data-auth="login" aria-pressed="${!state.register}" class="${state.register?'':'active'}">登录</button><button type="button" data-auth="register" aria-pressed="${state.register}" class="${state.register?'active':''}">注册账号</button></div><form id="authForm"><label>用户名<input name="username" autocomplete="username" minlength="3" maxlength="40" required placeholder="字母、数字或邮箱"></label>${state.register?'<label>姓名<input name="name" autocomplete="name" maxlength="40" required placeholder="填写你的姓名"></label><label>你的身份<select name="role">'+Object.entries(roles).map(([r,n])=>`<option value="${r}">${n}</option>`).join('')+'</select></label>':''}<label>密码<input name="password" type="password" autocomplete="${state.register?'new-password':'current-password'}" minlength="8" maxlength="128" required placeholder="至少 8 位字符"></label><button type="submit">${state.register?'注册并进入项目':'登录并进入项目'}<span aria-hidden="true">↗</span></button></form><p class="auth-note">设计与材料先确认，施工与验收有记录。<br>支持铺砖、水电点位等协作模板。</p></div></section>`;
-  return `<div class="entry-page">${entryHeader()}<main class="entry-layout" id="main-content">${materialStory()}${access}</main>${entryFooter()}</div>`;
+async function enterProduct(button){
+  if(state.switching)return;
+  if(!state.demo?.available){notify('协作服务暂未连接，请重新启动新版服务。');return;}
+  state.switching=true;
+  const role=state.entryRole||'coordinator';
+  try{
+    await busy(button,async()=>{
+      if(!state.demo.ready)await enterDemo('coordinator',true);
+      if(role!=='coordinator'||!state.user)await enterDemo(role,true);
+      state.tab='overview';
+      render();
+      window.scrollTo(0,0);
+      document.querySelector('.page-head h1')?.setAttribute('tabindex','-1');
+      document.querySelector('.page-head h1')?.focus({preventScroll:true});
+    });
+  }finally{state.switching=false;}
 }
 function shell(content){
   const tabs=!state.roadshow&&state.user.role!=='mediator'?[['changes',state.user.role==='coordinator'?'成员与邀请':'变更与照片']]:[['overview','项目总览'],['schedule','工期与排程'],['changes','变更协商'],['tasks','施工与照片'],['members','成员与邀请'],['activity','确认与退回记录']];
-  return `<div class="shell"><aside class="sidebar"><div><div class="brand">工序共识</div><small>家装四方协作</small></div><nav class="nav" aria-label="项目导航">${tabs.map(([id,title])=>`<button data-tab="${id}" class="${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''}>${title}</button>`).join('')}</nav><div class="sidebar-footer"><div><strong>${esc(state.user.name)}</strong><br><small>${esc(roles[state.user.role])}</small></div><button id="logout">退出登录</button></div></aside><div class="workspace"><header class="topbar"><select id="projectSelect" aria-label="当前项目"><option value="">创建或加入项目</option>${state.projects.map(p=>`<option value="${p.id}" ${p.id===state.project?.id?'selected':''}>${esc(p.title)}</option>`).join('')}</select><div class="row"><span class="muted">${state.project?`共享版本 ${state.project.revision}`:'项目成员受邀加入'}</span><button id="refresh" class="secondary">${state.pending?'有更新，点击刷新':'刷新'}</button></div></header><main class="content" id="main-content">${content}</main></div></div>`;
+  return `<div class="shell"><aside class="sidebar"><div><div class="brand">共序·港乡</div><small>家装四方协作</small></div><nav class="nav" aria-label="项目导航">${tabs.map(([id,title])=>`<button data-tab="${id}" class="${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''}>${title}</button>`).join('')}</nav><div class="sidebar-footer"><div><strong>${esc(state.user.name)}</strong><br><small>${esc(roles[state.user.role])}</small></div><button id="logout">返回开场</button></div></aside><div class="workspace"><header class="topbar"><select id="projectSelect" aria-label="当前项目"><option value="">创建或加入项目</option>${state.projects.map(p=>`<option value="${p.id}" ${p.id===state.project?.id?'selected':''}>${esc(p.title)}</option>`).join('')}</select><div class="row"><span class="muted">${state.project?`共享版本 ${state.project.revision}`:'项目成员受邀加入'}</span><button id="refresh" class="secondary">${state.pending?'有更新，点击刷新':'刷新'}</button></div></header><main class="content" id="main-content">${content}</main></div></div>`;
 }
 function onboarding(){
   const invite=new URLSearchParams(location.hash.slice(1)).get('join')||'';
@@ -307,7 +323,7 @@ function responsibilityTable(tasks){
 }
 function protocol(c){
   const r=revision(c), p=state.project;
-  return `<article class="print-protocol"><h1>工序共识 · 共享协议单</h1><p>${esc(p.title)} · 变更 ${esc(c.id)} · v${r.number} · ${esc(statuses[c.status])}</p><small>导出时间 ${stamp(new Date().toISOString())}${p.data.synthetic?' · 演示用合成案例':''}</small><h2>原始要求与共同依据</h2><p>${esc(c.source.author_name)} · ${stamp(c.source.at)}</p><p>${esc(c.source.text)}</p><p>提出时原方案：${esc((c.original_baseline||c.baseline).reference)} · ${esc((c.original_baseline||c.baseline).text)}</p><p>本版基于正式方案 v${c.baseline.version} · ${esc(c.baseline.reference)}</p><dl>${Object.entries(fieldLabels(c)).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(r.data[key]??'待确认')}</dd>`).join('')}</dl><h2>工期与责任分派</h2><p>选定方案：${r.data.scheme==='parallel'?'先做可并行工作':'直接顺延'} · ${c.plans[r.data.scheme]?esc(c.plans[r.data.scheme].start)+' 至 '+esc(c.plans[r.data.scheme].finish):'日期待确认'}</p>${responsibilityTable(r.tasks)}<h2>历次确认与退回</h2>${c.approvals.map(a=>`<p>v${a.version} · ${esc(kinds[a.kind])} · ${esc(a.actor_name)} · ${a.decision==='approve'?'通过':'退回'} · ${stamp(a.at)}<br>${esc(a.note)}</p>`).join('')||'<p>尚无确认记录</p>'}<h2>已上传资料</h2>${p.files.filter(f=>f.change_id===c.id).map(f=>`<p>${esc(f.name)} · ${esc(f.reference)} · 上传于 v${f.version} · ${esc(f.uploaded_by)}</p>`).join('')||'<p>尚无资料</p>'}<h2>完整过程记录</h2>${eventsView(p.data.events.filter(e=>e.change_id===c.id))}<p>此单汇集项目内确认记录；施工结果以人工验收为准。</p></article>`;
+  return `<article class="print-protocol"><h1>共序·港乡 · 共享协议单</h1><p>${esc(p.title)} · 变更 ${esc(c.id)} · v${r.number} · ${esc(statuses[c.status])}</p><small>导出时间 ${stamp(new Date().toISOString())}${p.data.synthetic?' · 演示用合成案例':''}</small><h2>原始要求与共同依据</h2><p>${esc(c.source.author_name)} · ${stamp(c.source.at)}</p><p>${esc(c.source.text)}</p><p>提出时原方案：${esc((c.original_baseline||c.baseline).reference)} · ${esc((c.original_baseline||c.baseline).text)}</p><p>本版基于正式方案 v${c.baseline.version} · ${esc(c.baseline.reference)}</p><dl>${Object.entries(fieldLabels(c)).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(r.data[key]??'待确认')}</dd>`).join('')}</dl><h2>工期与责任分派</h2><p>选定方案：${r.data.scheme==='parallel'?'先做可并行工作':'直接顺延'} · ${c.plans[r.data.scheme]?esc(c.plans[r.data.scheme].start)+' 至 '+esc(c.plans[r.data.scheme].finish):'日期待确认'}</p>${responsibilityTable(r.tasks)}<h2>历次确认与退回</h2>${c.approvals.map(a=>`<p>v${a.version} · ${esc(kinds[a.kind])} · ${esc(a.actor_name)} · ${a.decision==='approve'?'通过':'退回'} · ${stamp(a.at)}<br>${esc(a.note)}</p>`).join('')||'<p>尚无确认记录</p>'}<h2>已上传资料</h2>${p.files.filter(f=>f.change_id===c.id).map(f=>`<p>${esc(f.name)} · ${esc(f.reference)} · 上传于 v${f.version} · ${esc(f.uploaded_by)}</p>`).join('')||'<p>尚无资料</p>'}<h2>完整过程记录</h2>${eventsView(p.data.events.filter(e=>e.change_id===c.id))}<p>此单汇集项目内确认记录；施工结果以人工验收为准。</p></article>`;
 }
 function versionHistory(c){
   const original=c.original_baseline||c.baseline;
@@ -559,11 +575,11 @@ function schedulePage(){
 }
 function render(){
   if(!state.user&&state.demo?.available&&!location.hash.startsWith('#join=')){
-    $('#app').innerHTML=authPage();
+    $('#app').innerHTML=openingPage();
     bind();
     return;
   }
-  if(!state.user){$('#app').innerHTML=authPage();bind();return;}
+  if(!state.user){$('#app').innerHTML=openingPage();bind();return;}
   let content;
   if(state.project&&!state.roadshow&&state.user.role!=='mediator'){
     const cases=state.project.data.changes.filter(c=>c.collaboration);
@@ -578,19 +594,18 @@ function render(){
   else content=overview();
   $('#app').innerHTML=shell(content);bind();
   if(state.demo?.available){
-    if(!location.hash.startsWith('#join='))$('#logout').hidden=true;
     $('.sidebar-footer').insertAdjacentHTML('afterend',`<details class="demo-switch"><summary>${state.demoProfile?'切换身份':'演示身份'}</summary><div class="demo-role-grid">${demoRoleButtons()}</div></details>`);
     bindDemoRoles();
   }
 }
 async function enterDemo(role, initial=false){
-  state.roadshow=state.roadshow||new URLSearchParams(location.search).get('show')==='1';
+  state.roadshow=true;
   const result=await post('/api/demo-login',{role});
   const same=Boolean(result.demo_project_id)&&state.project?.id===result.demo_project_id;
-  const tab=same?state.tab:initial?'schedule':'changes';
+  const tab=same?state.tab:initial?'overview':'changes';
   const changeId=same?state.changeId:null;
   Object.assign(state,{user:result.user,csrf:result.csrf,project:null,changeId,tab,demoProfile:true,dirty:false});
-  history.replaceState(null,'',location.pathname+(state.roadshow?'?show=1':''));
+  history.replaceState(null,'',location.pathname);
   const project=result.demo_project_id?await api('/api/projects/'+result.demo_project_id):await post('/api/projects/demo',{});
   state.demo.ready=true;
   if(initial)state.changeId=project.data.changes.find(c=>c.kitchen_change)?.id||state.changeId;
@@ -693,6 +708,23 @@ function fillExample(input,text){
   input.setSelectionRange(input.value.length,input.value.length);
 }
 function bind(){
+  document.querySelectorAll('[data-enter-product]').forEach(button=>button.onclick=()=>enterProduct(button));
+  if($('#retryConnection'))$('#retryConnection').onclick=()=>boot();
+  document.querySelectorAll('[data-entry-role]').forEach(button=>button.onclick=()=>{
+    state.entryRole=button.dataset.entryRole;
+    document.querySelectorAll('[data-entry-role]').forEach(x=>{
+      const active=x===button;x.setAttribute('aria-pressed',String(active));
+      x.querySelector('.role-check').textContent=active?'✓':'↗';
+    });
+    $('#entry-role-hint').textContent=`以${entryRoleNames[state.entryRole]}视角进入，同一份案例、同一份记录。`;
+  });
+  document.querySelectorAll('[data-entry-stage]').forEach(button=>button.onclick=()=>{
+    state.entryStage=Number(button.dataset.entryStage);
+    const item=entryStages[state.entryStage];
+    document.querySelectorAll('[data-entry-stage]').forEach(x=>x.setAttribute('aria-pressed',String(x===button)));
+    $('#entry-stage-title').textContent=item.title;$('#entry-stage-text').textContent=item.text;$('#entry-stage-note').textContent=item.note;
+    if(!matchMedia('(prefers-reduced-motion: reduce)').matches)$('.opening-flow-note').animate([{opacity:.5,transform:'translateY(5px)'},{opacity:1,transform:'translateY(0)'}],{duration:200,easing:'ease-out'});
+  });
   bindExamples();
   document.querySelectorAll('[data-translate]').forEach(button=>button.onclick=()=>busy(button,async()=>{
     const output=button.parentElement.querySelector('[data-translation-result]');
@@ -754,8 +786,6 @@ function bind(){
     event.preventDefault();
     document.getElementById('review-task-'+link.dataset.reviewTask)?.scrollIntoView({block:'start'});
   });
-  if($('#accountLogin'))$('#accountLogin').onclick=()=>{state.accountLogin=true;render();};
-  document.querySelectorAll('[data-auth]').forEach(button=>button.onclick=()=>{state.register=button.dataset.auth==='register';render();});
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{
     state.tab=button.dataset.tab;
     if(change()?.refund&&['schedule','tasks'].includes(state.tab)){
@@ -766,14 +796,8 @@ function bind(){
     window.scrollTo(0,0);
   });
   document.querySelectorAll('form').forEach(form=>form.addEventListener('input',()=>{state.dirty=true;}));
-  bindForm('#authForm',async form=>{
-    const result=await post(state.register?'/api/register':'/api/login',Object.fromEntries(form));
-    state.user=result.user;state.csrf=result.csrf;state.dirty=false;state.demoProfile=false;
-    await refreshProjects();
-    if(state.projects.length&&!location.hash.startsWith('#join='))await selectProject(state.projects[0].id);else render();
-  });
   if(!state.user)return;
-  $('#logout').onclick=()=>busy($('#logout'),async()=>{await post('/api/logout',{});Object.assign(state,{user:null,project:null,projects:[],csrf:'',accountLogin:false,demoProfile:false});render();});
+  $('#logout').onclick=()=>busy($('#logout'),async()=>{await post('/api/logout',{});Object.assign(state,{user:null,project:null,projects:[],csrf:'',demoProfile:false});render();});
   $('#projectSelect').onchange=e=>busy(null,()=>selectProject(e.target.value));
   $('#refresh').onclick=()=>busy($('#refresh'),async()=>{await refreshProjects();if(state.project)await selectProject(state.project.id);else render();});
   if($('#openDemo'))$('#openDemo').onclick=()=>busy($('#openDemo'),async()=>{
@@ -952,18 +976,16 @@ function bindSchedule(){
 }
 function showRefresh(){state.pending=true;const button=$('#refresh');if(button)button.textContent='有更新，点击刷新';}
 async function boot(){
-  try{state.demo=await api('/api/demo-access');}catch{}
-  if(state.demo?.available&&!location.hash.startsWith('#join=')){
+  try{state.demo=await api('/api/demo-access');}catch{state.demo={available:false,ready:false};}
+  state.roadshow=true;
+  if(state.demo?.ready){
     try{
-      await enterDemo('coordinator',true);
-    }catch(error){
-      state.user=null;
-      render();
-      notify(error.message);
-    }
-    return;
+      const result=await api('/api/me');
+      state.user=result.user;state.csrf=result.csrf;state.demoProfile=result.demo_profile;
+      await refreshProjects();
+      if(state.projects.length){await selectProject(state.projects[0].id);return;}
+    }catch{state.user=null;}
   }
-  try{const result=await api('/api/me');state.roadshow=new URLSearchParams(location.search).get('show')==='1';state.user=result.user;state.csrf=result.csrf;state.demoProfile=result.demo_profile;await refreshProjects();if(state.projects.length&&!location.hash.startsWith('#join=')){await selectProject(state.projects[0].id);return;}}catch{}
   render();
 }
 setInterval(async()=>{

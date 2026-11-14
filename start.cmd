@@ -2,12 +2,15 @@
 setlocal
 cd /d "%~dp0"
 if not defined TASKFLOW_PORT set "TASKFLOW_PORT=8774"
-if /i "%~1"=="demo" (
-  set "TASKFLOW_PORT=8775"
-  set "TASKFLOW_HOST=127.0.0.1"
-  set "TASKFLOW_DEMO_ACCESS=1"
-  set "TASKFLOW_KITCHEN_DEMO=1"
-  set "TASKFLOW_DATA_DIR=%~dp0instance\kitchen-demo"
+if not defined TASKFLOW_HOST set "TASKFLOW_HOST=127.0.0.1"
+if not defined TASKFLOW_DEMO_ACCESS set "TASKFLOW_DEMO_ACCESS=1"
+if not defined TASKFLOW_KITCHEN_DEMO set "TASKFLOW_KITCHEN_DEMO=1"
+if not defined TASKFLOW_DATA_DIR set "TASKFLOW_DATA_DIR=%~dp0instance\kitchen-demo"
+if /i "%~1"=="demo" set "TASKFLOW_PORT=8775"
+if not exist "%~dp0requirements.txt" (
+  echo Please extract the entire ZIP first, then run start.cmd from the extracted folder.
+  pause
+  exit /b 1
 )
 if not exist ".venv\Scripts\python.exe" (
   py -3 -m venv .venv
@@ -27,7 +30,7 @@ if errorlevel 1 (
   )
 )
 if /i "%~1"=="demo" (
-  echo The demo opens directly in the coordinator view.
+  echo Choose a role on the opening page to enter the collaboration workspace.
 )
 echo Open http://localhost:%TASKFLOW_PORT% after the server starts.
 echo Keep this window open. Press Ctrl+C to stop the server.

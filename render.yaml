@@ -7,6 +7,12 @@ services:
     autoDeployTrigger: commit
     healthCheckPath: /api/health
     envVars:
+      - key: TASKFLOW_PUBLIC_PREVIEW
+        value: "1"
+      - key: TASKFLOW_DEMO_ACCESS
+        value: "1"
+      - key: TASKFLOW_KITCHEN_DEMO
+        value: "1"
       - key: TASKFLOW_TRUST_PROXY
         value: "1"
       - key: TASKFLOW_SECURE_COOKIE

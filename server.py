@@ -26,9 +26,18 @@ from photo_review import TASK_STANDARDS, ANGLES, CONTENT, inspect_photo
 ROOT = Path(__file__).resolve().parent
 
 
+def public_preview_host():
+    explicit = os.getenv('TASKFLOW_PUBLIC_DEMO_HOST', '')
+    if explicit:
+        return explicit
+    if os.getenv('TASKFLOW_PUBLIC_PREVIEW') == '1':
+        return os.getenv('TASKFLOW_PREVIEW_HOST', '') or os.getenv('RENDER_EXTERNAL_HOSTNAME', '')
+    return ''
+
+
 def create_app(data_dir=None, demo_access=False):
     app = Flask(__name__, static_folder='static')
-    public_demo_host = os.getenv('TASKFLOW_PUBLIC_DEMO_HOST', '')
+    public_demo_host = public_preview_host()
     if public_demo_host:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     elif os.getenv('TASKFLOW_TRUST_PROXY') == '1':
@@ -783,10 +792,13 @@ def create_app(data_dir=None, demo_access=False):
 
 if __name__ == '__main__':
     from waitress import serve
-    port = int(os.getenv('TASKFLOW_PORT', '8765'))
-    print(f'工序共识已启动：http://localhost:{port}', flush=True)
-    host = os.getenv('TASKFLOW_HOST', '0.0.0.0')
-    demo_access = os.getenv('TASKFLOW_DEMO_ACCESS') == '1' and host == '127.0.0.1'
+    port = int(os.getenv('TASKFLOW_PORT', '8774'))
+    print(f'共序·港乡已启动：http://localhost:{port}', flush=True)
+    host = os.getenv('TASKFLOW_HOST', '127.0.0.1')
+    public_host = public_preview_host()
+    if os.getenv('TASKFLOW_PUBLIC_PREVIEW') == '1' and not public_host:
+        raise SystemExit('Public preview requires TASKFLOW_PREVIEW_HOST or RENDER_EXTERNAL_HOSTNAME.')
+    demo_access = os.getenv('TASKFLOW_DEMO_ACCESS', '1') == '1' and (host == '127.0.0.1' or bool(public_host))
     proxy = {}
     if os.getenv('TASKFLOW_PUBLIC_DEMO_HOST'):
         if host != '127.0.0.1' or not demo_access:
