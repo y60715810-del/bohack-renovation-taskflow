@@ -8,76 +8,56 @@ const fieldLabels = c => ({
   ...templateFor(c).design,
   ...Object.fromEntries(Object.entries(labels).filter(([key]) => !Object.hasOwn(state.project.templates.tiles.design, key)))
 });
-const state = {user:null,csrf:'',projects:[],project:null,tab:'overview',changeId:null,entryRole:'coordinator',entryStage:0,dirty:false,pending:false};
+const state = {user:null,csrf:'',projects:[],project:null,tab:'overview',changeId:null,register:false,showOpening:true,dirty:false,pending:false};
 const $ = selector => document.querySelector(selector);
-const $$ = selector => [...document.querySelectorAll(selector)];
-const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
-  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-}[char]));
-const stamp = value => value ? new Date(value).toLocaleString('zh-CN', {hour12:false}) : '';
-const name = id => state.project.members.find(member => member.id === id)?.name || id;
-const change = () => state.project?.data.changes.find(c => c.id === state.changeId) || state.project?.data.changes.at(-1);
-const revision = c => c.versions.at(-1);
-const isApproved = (c, kind) => c.approvals.some(a => a.version === revision(c).number && a.kind === kind && a.decision === 'approve');
-const tag = (text, tone='') => `<span class="tag ${tone}">${esc(text)}</span>`;
-function api(path, options={}){
-  options.credentials = 'same-origin';
-  if(state.csrf && options.method) options.headers = {'X-CSRF-Token': state.csrf, ...(options.headers||{})};
-  return fetch(path, options).then(async response => {
-    const data = await response.json().catch(() => ({}));
-    if(!response.ok) throw new Error(data.error || '请求失败，请稍后重试。');
-    return data;
-  });
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const stamp = value => value ? new Date(value).toLocaleString('zh-CN',{hour12:false}) : '待确认';
+const tag = (text,style='') => `<span class="tag ${style}">${esc(text)}</span>`;
+const name = id => state.project?.members.find(m=>m.id===id)?.name || '待指派';
+const change = () => state.project?.data.changes.find(c=>c.id===state.changeId);
+const revision = c => c.versions[c.versions.length-1];
+const isApproved = (c,k) => c.approvals.some(a=>a.version===revision(c).number && a.kind===k && a.decision==='approve');
+let toastTimer;
+function notify(message){
+  const box=$('#toast'); box.textContent=message; box.hidden=false;
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>{box.hidden=true;},8500);
 }
-function post(path, data){
-  return api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+async function api(path,options={}){
+  const headers={'X-CSRF-Token':state.csrf,...options.headers};
+  if(options.body && !(options.body instanceof FormData)) headers['Content-Type']='application/json';
+  const response=await fetch(path,{credentials:'same-origin',...options,headers});
+  const result=await response.json();
+  if(!response.ok){
+    if(response.status===401 && !['/api/login','/api/register','/api/me'].includes(path)){state.user=null;render();}
+    if(response.status===409 && result.error.includes('其他成员')) showRefresh();
+    throw new Error(result.error || '请求失败，请重试。');
+  }
+  return result;
+}
+function post(path,data){return api(path,{method:'POST',body:JSON.stringify(data)});}
+async function busy(button,work){
+  if(button?.disabled)return;
+  if(button)button.disabled=true;
+  try{await work();}catch(error){notify(error.message);}finally{if(button?.isConnected)button.disabled=false;}
 }
 function setProject(project){
-  state.project = project;
-  if(project && !state.project.data.changes.some(c => c.id === state.changeId)) state.changeId = project.data.changes.at(-1)?.id || null;
+  state.project=project;state.dirty=false;state.pending=false;
+  if(!project.data.changes.some(c=>c.id===state.changeId))state.changeId=project.data.changes.at(-1)?.id || null;
   render();
 }
-async function refreshProjects(){
-  state.projects = (await api('/api/projects')).projects;
-}
+async function refreshProjects(){state.projects=(await api('/api/projects')).projects;}
 async function selectProject(id){
-  if(!id) { state.project = null; render(); return; }
-  setProject(await api('/api/projects/'+id));
+  if(!id){state.project=null;render();return;}
+  setProject(await api(`/api/projects/${id}`));
 }
-function notify(message){
-  const note = document.createElement('div');
-  note.className = 'toast';
-  note.setAttribute('role', 'status');
-  note.textContent = message;
-  document.body.appendChild(note);
-  setTimeout(() => {
-    note.classList.add('show');
-  }, 10);
-  setTimeout(() => {
-    note.classList.remove('show');
-    setTimeout(() => note.remove(), 300);
-  }, 2600);
-}
-async function busy(button, work){
-  if(button){
-    button.disabled = true;
-    button.dataset.busy = '处理中';
+function field(key,value,options={}){
+  const type=options.type||'text';
+  let inputValue=value??'';
+  if(type==='datetime-local' && value){
+    const date=new Date(value);const local=new Date(date-date.getTimezoneOffset()*60000);inputValue=local.toISOString().slice(0,16);
   }
-  try { return await work(); }
-  finally {
-    if(button){
-      button.disabled = false;
-      delete button.dataset.busy;
-    }
-  }
-}
-function inputValue(state2, key){
-  return state2?.[key] ?? '';
-}
-function field(key, value, options={}){
-  const control = options.area ?
-    `<textarea name="${key}" ${options.required?'required':''} maxlength="2000">${esc(value)}</textarea>` :
-    `<input name="${key}" type="${options.type||'text'}" value="${esc(inputValue({},key)||value)}" ${options.required?'required':''} ${options.step?`step="${options.step}"`:''} ${options.min!==undefined?`min="${options.min}"`:''} maxlength="2000">`;
+  const control=options.area?`<textarea name="${key}" ${options.required?'required':''}>${esc(inputValue)}</textarea>`:
+    `<input name="${key}" type="${type}" value="${esc(inputValue)}" ${options.required?'required':''} ${options.step?`step="${options.step}"`:''} ${options.min!==undefined?`min="${options.min}"`:''} maxlength="2000">`;
   return `<label class="${options.wide?'wide':''}">${esc(options.label||labels[key]||key)}${control}</label>`;
 }
 function peopleSelect(key,selected,role,allowEmpty=true){
@@ -89,45 +69,31 @@ const demoRoles={coordinator:'创建案例和协调分工',owner:'查看方案�
 function demoRoleButtons(){
   return Object.entries(demoRoles).map(([role,description])=>`<button type="button" class="secondary" data-demo-role="${role}" ${!state.demo.ready&&role!=='coordinator'?'disabled':''}><strong>${esc(roles[role])}</strong><small>${description}</small></button>`).join('');
 }
-function demoHeroTiles(){
-  return Object.entries(demoRoles).map(([role,description])=>`<button type="button" data-demo-role="${role}" ${!state.demo.ready&&role!=='coordinator'?'disabled':''}><strong>${esc(roles[role])}</strong><small>${description}</small></button>`).join('');
-}
 
-const entryStages=[
-  {title:'说出需求',label:'需求',role:'住户',text:'把想要的家说明白，原话始终保留。',note:'从一个想法开始，让四方看见同一份需求。'},
-  {title:'完善方案',label:'方案',role:'设计与施工',text:'图纸、材料、报价和日期，逐项核对。',note:'每一项调整，都有能一起核对的依据。'},
-  {title:'共同确认',label:'共识',role:'中介协调',text:'各方确认同一版本，再发布正式排程。',note:'让设计、施工和住户，站在同一页上。'},
-  {title:'有序交付',label:'交付',role:'四方协作',text:'施工留痕、任务确认，最终由住户验收。',note:'从图纸走向现场，每一步都有人负责。'}
-];
-const entryRoleNames={coordinator:'项目经理',owner:'住户',designer:'设计师',contractor:'施工团队'};
-function entryHeader(){
-  return `<header class="entry-header"><a class="entry-brand" href="/" aria-label="共序·港乡首页"><span class="brand-symbol" aria-hidden="true">共</span><span>共序·港乡<small>共识有据 · 交付有序</small></span></a><button class="entry-nav entry-skip" type="button" data-enter-product aria-label="跳过开场，直接进入"><span class="entry-skip-label">跳过开场，直接进入</span> <span aria-hidden="true">↗</span></button></header>`;
-}
+const directoryRoles={coordinator:'中介方',owner:'住户',designer:'设计师',contractor:'施工团队'};
 function openingPage(){
-  const selected=state.entryRole||'coordinator',stage=state.entryStage||0,item=entryStages[stage];
-  const available=state.demo?.available;
-  return `<div class="entry-page direct-entry">${entryHeader()}<main id="main-content" class="opening-layout"><section class="opening-copy" aria-labelledby="entry-title"><p class="eyebrow">共序·港乡 / 四方家装协作</p><h1 id="entry-title">让家的每一步，<br>都有<span>共同的方向。</span></h1><p class="entry-lead">从一句想法，到一份方案，再到现场交付。<br>住户、设计、施工与中介，在同一个现场协作。</p><div class="opening-flow" aria-label="探索协作过程">${entryStages.map((x,i)=>`<button type="button" data-entry-stage="${i}" aria-pressed="${i===stage}"><span>0${i+1}</span>${x.label}</button>`).join('')}</div><div class="opening-flow-note" aria-live="polite" aria-atomic="true"><h2 id="entry-stage-title">${item.title}</h2><p id="entry-stage-text">${item.text}</p></div><button class="story-link" type="button" data-open-story>看看四方如何协作 <span aria-hidden="true">↗</span></button></section><figure class="opening-visual"><div class="opening-image"><img src="/static/images/material-study.webp" width="1536" height="1024" alt="浅蓝陶砖、洞石与木纹组成的装修材质示意" fetchpriority="high"><span class="material-label">蓝白之间，家的共识。</span></div><figcaption><span>材质示意 · 非项目现场</span><span id="entry-stage-note">${item.note}</span></figcaption></figure><section class="entry-launch" aria-labelledby="entry-role-title"><div class="entry-launch-head"><div><p class="eyebrow">四方同场，各有角色</p><h2 id="entry-role-title">从你的视角，走进协作。</h2></div><p>选择身份即可体验，进入后也能随时切换。</p></div><div class="entry-role-options" role="group" aria-label="选择体验身份">${Object.entries(demoRoles).map(([role,description],i)=>`<button type="button" data-entry-role="${role}" aria-pressed="${role===selected}"><span class="role-index" aria-hidden="true">0${i+1}</span><strong>${entryRoleNames[role]}</strong><small>${description}</small><span class="role-check" aria-hidden="true">${role===selected?'✓':'↗'}</span></button>`).join('')}</div><div class="entry-launch-bottom"><p id="entry-role-hint" aria-live="polite">以${entryRoleNames[selected]}视角进入，同一份案例、同一份记录。</p><button type="button" class="enter-product" data-enter-product ${available?'':'disabled'}>${available?'进入协作现场':'协作服务尚未连接'} <span aria-hidden="true">↗</span></button></div>${available?'':'<p class="notice error">请使用新版 start.cmd 启动；已有部署请开启直接体验模式。<button type="button" class="link" id="retryConnection">重新连接</button></p>'}</section></main><footer class="entry-footer"><span>共序·港乡 · 把每一步，交给共同的共识。</span><span>需求 · 方案 · 确认 · 交付</span></footer></div>`;
+  const ready=Boolean(state.user&&state.demo?.ready);
+  return `<div class="opening"><header class="opening-header"><a class="opening-brand" href="/">共序·港乡<span>家装四方协作</span></a><button type="button" class="opening-skip" data-skip-opening ${ready?'':'disabled'}>跳过开场 <span aria-hidden="true">↗</span></button></header><main id="main-content" class="opening-main"><div class="opening-copy"><p class="opening-kicker">共识有据 / 交付有序</p><h1>每一道工序，<br>都有共同的依据。</h1><p class="opening-lead">需求、方案、确认与交付。<br>四方在同一个项目里，推进每一步。</p><nav class="opening-directory" aria-label="选择角色进入原有页面"><span class="directory-caption">目录 / 选择身份</span>${Object.entries(directoryRoles).map(([role,title],i)=>`<button type="button" data-opening-role="${role}" ${ready?'':'disabled'}><span class="directory-number">0${i+1}</span><span>${title}</span><span class="directory-description">${demoRoles[role]}</span><span aria-hidden="true">↗</span></button>`).join('')}</nav><div class="opening-actions"><button type="button" class="opening-film" data-open-story>播放协作开场 <span aria-hidden="true">↗</span></button><span class="opening-note" role="status">${ready?'选择身份，进入原有协作页面。':state.demo?.available?'正在连接原有协作现场…':'协作服务未连接，请启动新版 start.cmd。'}</span>${ready?'':'<button type="button" class="link" id="retryOpening">重新连接</button>'}</div></div><figure class="opening-material"><img src="/static/images/material-study.webp" width="1536" height="1024" alt="陶砖、洞石与木纹组成的黑白装修材质示意" fetchpriority="high"><figcaption><span>共序·港乡</span><span>材质示意 · 非项目现场</span></figcaption></figure></main><footer class="opening-footer"><span>住户 / 中介方 / 设计师 / 施工团队</span><span>把每一步，交给共同的共识。</span></footer></div>`;
 }
-async function enterProduct(button){
-  if(state.switching)return;
-  if(!state.demo?.available){notify('协作服务暂未连接，请重新启动新版服务。');return;}
-  state.switching=true;
-  const role=state.entryRole||'coordinator';
-  try{
-    await busy(button,async()=>{
-      if(!state.demo.ready)await enterDemo('coordinator',true);
-      if(role!=='coordinator'||!state.user)await enterDemo(role,true);
-      state.tab='overview';
-      render();
-      window.scrollTo(0,0);
-      document.querySelector('.page-head h1')?.setAttribute('tabindex','-1');
-      document.querySelector('.page-head h1')?.focus({preventScroll:true});
-    });
-  }finally{state.switching=false;}
+function bindOpening(){
+  document.querySelectorAll('[data-opening-role]').forEach(button=>button.onclick=()=>busy(button,async()=>{
+    const scroll=window.scrollY;
+    try{
+      await enterDemo(button.dataset.openingRole);
+      state.showOpening=false;render();window.scrollTo(0,0);
+    }catch(error){window.scrollTo(0,scroll);throw error;}
+  }));
+  document.querySelectorAll('[data-skip-opening]').forEach(button=>button.onclick=()=>{
+    state.showOpening=false;render();window.scrollTo(0,0);
+  });
+  if($('#retryOpening'))$('#retryOpening').onclick=()=>boot();
+}
+function roleDirectory(){
+  return `<details class="role-directory demo-switch"><summary>目录 <span>${esc(directoryRoles[state.user.role]||roles[state.user.role])}</span><span class="directory-toggle" aria-hidden="true">＋</span></summary><nav class="role-directory-list" aria-label="角色目录">${Object.entries(directoryRoles).map(([role,title],i)=>`<button type="button" data-demo-role="${role}" ${state.user.role===role?'aria-current="page"':''}><span>0${i+1}</span><strong>${title}</strong><span aria-hidden="true">↗</span></button>`).join('')}<button type="button" data-return-opening>返回开场 <span aria-hidden="true">↗</span></button></nav></details>`;
 }
 function shell(content){
   const tabs=!state.roadshow&&state.user.role!=='mediator'?[['changes',state.user.role==='coordinator'?'成员与邀请':'变更与照片']]:[['overview','项目总览'],['schedule','工期与排程'],['changes','变更协商'],['tasks','施工与照片'],['members','成员与邀请'],['activity','确认与退回记录']];
-  return `<div class="shell"><aside class="sidebar"><div><div class="brand">共序·港乡</div><small>家装四方协作</small></div><nav class="nav" aria-label="项目导航">${tabs.map(([id,title])=>`<button data-tab="${id}" class="${state.tab===id?'active':''}" ${state.tab===id?'aria-current="page"':''}>${title}</button>`).join('')}</nav><div class="sidebar-footer"><div><strong>${esc(state.user.name)}</strong><br><small>${esc(roles[state.user.role])}</small></div><button id="logout">返回开场</button></div></aside><div class="workspace"><header class="topbar"><select id="projectSelect" aria-label="当前项目"><option value="">创建或加入项目</option>${state.projects.map(p=>`<option value="${p.id}" ${p.id===state.project?.id?'selected':''}>${esc(p.title)}</option>`).join('')}</select><div class="row"><span class="muted">${state.project?`共享版本 ${state.project.revision}`:'项目成员受邀加入'}</span><button id="refresh" class="secondary">${state.pending?'有更新，点击刷新':'刷新'}</button></div></header><main class="content" id="main-content">${content}</main></div></div>`;
+  return `<div class="shell"><aside class="sidebar"><div><div class="brand">共序·港乡</div><small>家装四方协作</small></div><nav class="nav">${tabs.map(([id,title])=>`<button data-tab="${id}" class="${state.tab===id?'active':''}">${title}</button>`).join('')}</nav><div class="sidebar-footer"><div><strong>${esc(state.user.name)}</strong><br><small>${esc(roles[state.user.role])}</small></div><button id="logout">退出登录</button></div></aside><div class="workspace"><header class="topbar"><select id="projectSelect" aria-label="当前项目"><option value="">创建或加入项目</option>${state.projects.map(p=>`<option value="${p.id}" ${p.id===state.project?.id?'selected':''}>${esc(p.title)}</option>`).join('')}</select><div class="row"><span class="muted">${state.project?`共享版本 ${state.project.revision}`:'项目成员受邀加入'}</span><button id="refresh" class="secondary">${state.pending?'有更新，点击刷新':'刷新'}</button></div></header><main class="content" id="main-content">${content}</main></div></div>`;
 }
 function onboarding(){
   const invite=new URLSearchParams(location.hash.slice(1)).get('join')||'';
@@ -285,7 +251,7 @@ function filePanel(c){
   if(siteMode)cats.push(['site','施工留痕照片 / 证据']);
   const files=state.project.files.filter(f=>f.change_id===c.id);
   const list=files.map(f=>`<div class="file-row"><div class="with-thumb">${isPhoto(f.name)?`<img class="thumb" src="/api/files/${f.id}/preview" alt="">`:''}<div><a href="/api/files/${f.id}">${esc(f.name)}</a><br><small>${esc(f.reference)} · 上传于 v${f.version} · ${esc(f.uploaded_by)}</small></div></div><small>${Math.ceil(f.size/1024)} KB</small></div>`).join('');
-  const standardOptions=siteMode?`<label>对应留痕标准<select name="evidenceKey" required><option value="">请选择标准</option>${templateFor(c).evidence.map(s=>`<option value="${s.key}">${esc(s.label)}</option>`).join('')}</select></label>`:'';
+  const standardOptions=siteMode?`<label>对应留痕标准<select name="evidenceKey" required><option value="">请选择标准</option>${templateFor(c).evidence.map(s=>`<option value="${s.key}">${s.key} · ${esc(s.label)}</option>`).join('')}</select></label>`:'';
   return `<section class="card"><h2>图纸、报价与现场留痕</h2>${photoStrip(files)}${files.length?list:'<p class="muted">等待成员上传图纸、报价或现场记录。</p>'}${cats.length?`<form id="uploadForm" class="stack"><label>用途<select name="kind">${cats.map(([k,n])=>`<option value="${k}">${esc(n)}</option>`).join('')}</select></label>${standardOptions}${field('reference','',{label:siteMode?'照片说明（拍的是什么、哪个位置）':'图纸版本 / 报价单编号（与方案字段一致）',required:true})}<label>选择文件<input type="file" name="file" accept=".png,.jpg,.jpeg,.pdf,.txt,.docx" ${siteMode?'capture="environmental"':''} required></label><small>${siteMode?'建议现场直接拍照上传：每张照片对应一条留痕标准。照片只用于演示留痕，施工结果以人工验收为准。':'单文件最多 8 MB。上传设计或报价材料前，请先完成对应字段修订。'}</small><button>上传并留存记录</button></form>`:''}${evidencePanel(c)}</section>`;
 }
 function photoEntry(c){
@@ -316,14 +282,14 @@ function evidencePanel(c){
   }
   const notes=(report?.findings||[]).map(f=>`<li><strong>${esc(f.file)}</strong> · 「${esc(f.evidence)}」<br>${esc(f.message)}</li>`).join('')
     +(report?.model_notes||[]).map(n=>`<li><strong>${esc(n.file)}</strong> · 「${esc(n.evidence)}」<br>${esc(n.note)}</li>`).join('');
-  return `<div class="evidence-check">${photoEntry(c)}<h3>附件齐备检查</h3><p class="muted">按每道工序要求核对附件是否齐全。画面判断显示在对应任务的照片下方。</p><div class="buttons"><button id="checkEvidence" class="secondary">检查附件清单</button></div>${body}${notes?`<h3>需人工复核的文字依据</h3><ul class="list">${notes}</ul>`:''}${report?`<p class="muted">${esc(report.missing.length?report.missing.join('、'):'图纸、报价、交付记录均已上传')}。已读取文字：${esc((report.read_files||[]).join('、')||'没有可读取的 TXT 文件')}。</p><small>资料齐备不代表施工合格；审批、确认与验收仍由各方人工完成。</small>`:''}</div>`;
+  return `<div class="evidence-check">${photoEntry(c)}<h3>附件齐备检查</h3><p class="muted">按每道工序要求核对附件是否齐全。画面判断显示在对应任务的照片下方。</p><div class="buttons"><button id="checkEvidence" class="secondary">检查附件清单</button></div>${body}${notes?`<h3>需人工复核的文字依据</h3><ul class="list">${notes}</ul>`:''}${report?`<p class="muted">三类资料核对：${esc(report.missing.length?report.missing.join('、'):'图纸、报价、交付记录均已上传')}。已读取文字：${esc((report.read_files||[]).join('、')||'没有可读取的 TXT 文件')}。</p><small>资料齐备不代表施工合格；审批、确认与验收仍由各方人工完成。</small>`:''}</div>`;
 }
 function responsibilityTable(tasks){
   return `<div class="table-wrap"><table><thead><tr><th>任务 / 交付物</th><th>执行人</th><th>确认人</th><th>截止日</th><th>前置条件</th></tr></thead><tbody>${tasks.map(t=>`<tr><td>${esc(t.title)}<br>${esc(t.output)}</td><td>${esc(name(t.owner_id))}</td><td>${t.reviewer_ids.map(name).map(esc).join('、')||'待指派'}</td><td>${esc(t.due||'待确认')}</td><td>${t.depends_on.map(id=>tasks.find(x=>x.id===id)?.title).map(esc).join('、')||'发布后可并行'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function protocol(c){
   const r=revision(c), p=state.project;
-  return `<article class="print-protocol"><h1>共序·港乡 · 共享协议单</h1><p>${esc(p.title)} · 变更 ${esc(c.id)} · v${r.number} · ${esc(statuses[c.status])}</p><small>导出时间 ${stamp(new Date().toISOString())}${p.data.synthetic?' · 演示用合成案例':''}</small><h2>原始要求与共同依据</h2><p>${esc(c.source.author_name)} · ${stamp(c.source.at)}</p><p>${esc(c.source.text)}</p><p>提出时原方案：${esc((c.original_baseline||c.baseline).reference)} · ${esc((c.original_baseline||c.baseline).text)}</p><p>本版基于正式方案 v${c.baseline.version} · ${esc(c.baseline.reference)}</p><dl>${Object.entries(fieldLabels(c)).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(r.data[key]??'待确认')}</dd>`).join('')}</dl><h2>工期与责任分派</h2><p>选定方案：${r.data.scheme==='parallel'?'先做可并行工作':'直接顺延'} · ${c.plans[r.data.scheme]?esc(c.plans[r.data.scheme].start)+' 至 '+esc(c.plans[r.data.scheme].finish):'日期待确认'}</p>${responsibilityTable(r.tasks)}<h2>历次确认与退回</h2>${c.approvals.map(a=>`<p>v${a.version} · ${esc(kinds[a.kind])} · ${esc(a.actor_name)} · ${a.decision==='approve'?'通过':'退回'} · ${stamp(a.at)}<br>${esc(a.note)}</p>`).join('')||'<p>尚无确认记录</p>'}<h2>已上传资料</h2>${p.files.filter(f=>f.change_id===c.id).map(f=>`<p>${esc(f.name)} · ${esc(f.reference)} · 上传于 v${f.version} · ${esc(f.uploaded_by)}</p>`).join('')||'<p>尚无资料</p>'}<h2>完整过程记录</h2>${eventsView(p.data.events.filter(e=>e.change_id===c.id))}<p>此单汇集项目内确认记录；施工结果以人工验收为准。</p></article>`;
+  return `<article class="print-protocol"><h1>共序·港乡 · 共享协议单</h1><p>${esc(p.title)} · 变更 ${esc(c.id)} · v${r.number} · ${esc(statuses[c.status])}</p><small>导出时间 ${stamp(new Date().toISOString())}${p.data.synthetic?' · 演示用合成案例':''}</small><h2>原始要求与共同依据</h2><p>${esc(c.source.author_name)} · ${stamp(c.source.at)}</p><p>${esc(c.source.text)}</p><p>提出时原方案：${esc((c.original_baseline||c.baseline).reference)} · ${esc((c.original_baseline||c.baseline).text)}</p><p>本版基于正式方案 v${c.baseline.version} · ${esc(c.baseline.reference)}</p><dl>${Object.entries(fieldLabels(c)).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(r.data[key]??'待确认')}</dd>`).join('')}</dl><h2>工期与责任分派</h2><p>选定方案：${r.data.scheme==='parallel'?'先做可并行工作':'直接顺延'} · ${c.plans[r.data.scheme]?esc(c.plans[r.data.scheme].start)+' 至 '+esc(c.plans[r.data.scheme].finish):'日期待确认'}</p>${responsibilityTable(r.tasks)}<h2>历次确认与退回</h2>${c.approvals.map(a=>`<p>v${a.version} · ${esc(kinds[a.kind])} · ${esc(a.actor_name)} · ${a.decision==='approve'?'通过':'退回'} · ${stamp(a.at)}<br>${esc(a.note)}</p>`).join('')||'<p>尚无确认记录</p>'}<h2>已上传资料</h2>${p.files.filter(f=>f.change_id===c.id).map(f=>`<p>${esc(f.name)} · ${esc(f.reference)} · 上传于 v${f.version} · ${esc(f.uploaded_by)}</p>`).join('')||'<p>尚无资料</p>'}<h2>完整过程记录</h2>${eventsView(p.data.events.filter(e=>e.change_id===c.id))}<p>此单汇集项目内确认记录；施工结果以人工验收记录为准。</p></article>`;
 }
 function versionHistory(c){
   const original=c.original_baseline||c.baseline;
@@ -338,7 +304,7 @@ function versionHistory(c){
       if(!old)return [];
       const diffs=[];
       if(old.title!==t.title)diffs.push(`名称 ${old.title} → ${t.title}`);
-      if(old.output!==t.output)diffs.push(`交付物 ${old.output} → ${t.title}`);
+      if(old.output!==t.output)diffs.push(`交付物 ${old.output} → ${t.output}`);
       if(old.owner_id!==t.owner_id)diffs.push(`执行人 ${name(old.owner_id)} → ${name(t.owner_id)}`);
       if(old.due!==t.due)diffs.push(`截止日 ${old.due||'待定'} → ${t.due||'待定'}`);
       if(JSON.stringify(old.reviewer_ids)!==JSON.stringify(t.reviewer_ids))diffs.push(`确认人 ${old.reviewer_ids.map(name).join('、')||'待定'} → ${t.reviewer_ids.map(name).join('、')||'待定'}`);
@@ -347,7 +313,7 @@ function versionHistory(c){
     const approvers=previous?Object.entries(v.approvers).filter(([key,id])=>previous.approvers[key]!==id).map(([key,id])=>`<li><strong>${esc(kinds[key])}确认人</strong>：${esc(name(previous.approvers[key]))} → ${esc(name(id))}</li>`):[];
     const decisions=c.approvals.filter(a=>a.version===v.number);
     const changes=[...values,...tasks,...approvers];
-    return `<details class="revision version-diff" ${index===0||index===c.versions.length-1?'open':''}><summary>v${v.number} · ${esc(v.reason)}</summary><p><small>${esc(v.by)} · ${stamp(v.at)}</small></p>${previous?changes.length?`<ul>${changes.join('')}</ul>`:'<p>本版未录入字段或任务变动，请查看修订原因。</p>':`<p>住户提出变更，原方案仍为 ${esc(original.reference)}，请进入协商。</p>`}${decisions.length?`<p><strong>本版确认记录</strong></p><ul>${decisions.map(a=>`<li>${esc(a.actor_name)} · ${esc(kinds[a.kind])} · ${a.decision==='approve'?'确认':'退回'}：${esc(a.note)}</li>`).join('')}</ul>`:''}</details>`;
+    return `<details class="revision version-diff" ${index===0||index===c.versions.length-1?'open':''}><summary>v${v.number} · ${esc(v.reason)}</summary><p><small>${esc(v.by)} · ${stamp(v.at)}</small></p>${previous?changes.length?`<ul>${changes.join('')}</ul>`:'<p>本版未录入字段或任务变动，请查看修订原因。</p>':`<p>住户提出变更，原方案仍为 ${esc(original.reference)}，设计、报价与工期进入协商。</p>`}${decisions.length?`<p><strong>本版确认记录</strong></p><ul>${decisions.map(a=>`<li>${esc(a.actor_name)} · ${esc(kinds[a.kind])} · ${a.decision==='approve'?'确认':'退回'}：${esc(a.note)}</li>`).join('')}</ul>`:''}</details>`;
   }).join('');
   const timeline=state.project.data.events.filter(e=>e.change_id===c.id).slice(-12).map(e=>e.action==='生成演示初审'&&state.project.data.synthetic?{...e,action:'检查演示附件',detail:'3 项附件已配齐、1 项缺失、1 项资料有误。'}:e);
   return `<section class="card"><h2>协商与版本记录</h2><div class="notice version-origin"><p><strong>原装修约定 · ${esc(original.reference)}</strong></p><p>${esc(original.text)}</p>${original.finish_date?`<p>原约定交付日 ${esc(original.finish_date)}</p>`:''}<p><strong>住户变更原话</strong></p><blockquote>${esc(c.source.text)}</blockquote></div>${versions}${timeline.length?`<details class="revision"><summary>最近操作记录</summary>${eventsView(timeline)}</details>`:''}<details class="revision"><summary>补充说明</summary><form id="commentForm" class="stack"><label>补充问题或说明<textarea name="text" required maxlength="2000"></textarea></label><button>发送到本项目</button></form></details></section>`;
@@ -398,11 +364,11 @@ function collaborationPage(){
   const history=project.data.events.filter(e=>e.change_id===c.id&&
     (e.action==='协商留言'||e.action.startsWith('变更 v')));
   const picker=cases.length>1?`<label>选择需求<select id="changeSelect">${cases.map(item=>`<option value="${esc(item.id)}" ${item===c?'selected':''}>${esc(item.source.text.slice(0,40))}</option>`).join('')}</select></label>`:'';
-  return header+`<div class="stack">${picker}<section class="card"><h2>${work.trigger==='materials'?'材料到货变更':'住户需求变更'}</h2><p>${esc(c.source.text)}</p><strong>${status} · v${work.version}</strong>${professional?`<p><strong>专业表述</strong> ${esc(wording?.wording?.translation||'暂未生成，先按上方原话沟通。')}</p><details class="revision"><summary>查看原施工方案</summary><p>${esc(c.baseline.text)}</p><p>${esc(c.baseline.reference)}</p></details>`:''}${work.proposal?`<p>拟议调整：${esc(work.proposal)}</p>`:''}${Object.entries(work.decisions).map(([key,d])=>`<p>${roleLabel[key]} · ${d.decision==='approve'?'确认可行':'已退回'} · ${esc(d.note)}</p>`).join('')}${stale?'<p>执行方案已有更新，请专业方基于当前方案提交新版。</p>':''}${reviewForm}</section><section class="card"><h2>现场照片</h2>${work.status!=='active'?'<p class="muted">可上传现场照片供各方核对。变更需三方确认后才能施工。</p>':''}${photoStrip(photos)||'<p>施工方上传后会显示在这里。</p>'}${role==='contractor'?`<form id="simplePhoto" class="stack" enctype="multipart/form-data"><label>照片说明<input name="reference" required maxlength="100" placeholder="例如：厨房墙面完工"></label><label>拍照或选择照片<input type="file" name="file" accept="image/jpeg,image/png" required></label><button>上传现场照片</button></form>`:''}</section><details class="card" ${professional?'open':''}><summary>协商记录</summary>${eventsView(history)}<form id="commentForm" class="stack"><label>补充说明<textarea name="text" required maxlength="2000"></textarea></label><button>发送说明</button></form></details>${owner?translationPanel(c):''}${intake}</div>`;
+  return header+`<div class="stack">${picker}<section class="card"><h2>${work.trigger==='materials'?'材料到货变更':'住户需求变更'}</h2><p>${esc(c.source.text)}</p><strong>${status} · v${work.version}</strong>${professional?`<p><strong>专业表述</strong> ${esc(work.wording.translation||'暂未生成，先按上方原话沟通。')}</p><details class="revision"><summary>查看原施工方案</summary><p>${esc(c.baseline.text)}</p><p>${esc(c.baseline.reference)}</p></details>`:''}${work.proposal?`<p>拟议调整：${esc(work.proposal)}</p>`:''}${Object.entries(work.decisions).map(([key,d])=>`<p>${roleLabel[key]} · ${d.decision==='approve'?'确认可行':'已退回'} · ${esc(d.note)}</p>`).join('')}${stale?'<p>执行方案已有更新，请专业方基于当前方案提交新版。</p>':''}${reviewForm}</section><section class="card"><h2>现场照片</h2>${work.status!=='active'?'<p class="muted">可上传现场照片供各方核对。变更需三方确认后才能施工。</p>':''}${photoStrip(photos)||'<p>施工方上传后会显示在这里。</p>'}${role==='contractor'?`<form id="simplePhoto" class="stack" enctype="multipart/form-data"><label>照片说明<input name="reference" required maxlength="100" placeholder="例如：厨房墙面完工"></label><label>拍照或选择照片<input type="file" name="file" accept="image/jpeg,image/png" required></label><button>上传现场照片</button></form>`:''}</section><details class="card" ${professional?'open':''}><summary>协商记录</summary>${eventsView(history)}<form id="commentForm" class="stack"><label>补充说明<textarea name="text" required maxlength="2000"></textarea></label><button>发送说明</button></form></details>${owner?translationPanel(c):''}${intake}</div>`;
 }
 function changesPage(){
   const c=change();
-  if(!c)return `<div class="page-head"><h1>变更协商</h1><p class="muted">住户提出要求后，各方围绕同一份方案补充信息、确认分工。</p></div>${sourceForm()}${state.user.role!=='owner'?'<div class="card empty">等待住户提出要求。请先邀请四方成员。</div>':''}`;
+  if(!c)return `<div class="page-head"><h1>变更协商</h1><p class="muted">住户提出要求后，各方围绕同一份方案补充信息、确认分工。</p></div>${sourceForm()}${state.user.role!=='owner'?'<div class="card empty">等待住户提出要求。请先邀请四方成员加入项目。</div>':''}`;
   if(c.refund){
     const kitchen=state.project.data.changes.find(item=>item.kitchen_change);
     return `<div class="page-head"><h1>住户变更 · 返费结果</h1><p class="muted">住户缩减施工范围后，四方在同一版本上核对返费与交付日期。</p></div>${changeToolbar()}<div class="stack">${refundSummary(c)}${translationPanel(c)}<section class="card"><h2>住户的改动要求</h2><p class="source">${esc(c.source.text)}</p>${kitchen?`<button class="secondary" data-schedule-change="${kitchen.id}">体验厨房换砖路演</button>`:''}</section>${approvalPanel(c)}<details class="card"><summary>查看图纸与版本记录</summary>${filePanel(c)}${versionHistory(c)}</details></div>`;
@@ -445,13 +411,13 @@ function reviewedPhoto(file){
   const r=file.photo_review;
   if(!r)return `<p><a href="/api/files/${file.id}">${esc(file.name)}</a><br><small>历史留痕 · 未做逐项照片初审</small></p>`;
   const rows=[['T · 时间',r.time,'项目规则：上传前 24 小时内，设备时钟容差 5 分钟'],['A · 拍摄角度',r.angle,r.angle_requirement],['C · 画面内容',r.content,r.content_requirement]];
-  return `<div class="photo-evaluation"><a href="/api/files/${file.id}"><img src="/api/files/${file.id}/preview" alt="${esc(file.name)}"></a><div><strong>${esc(file.reference)}</strong><small> · ${esc(file.name)}</small><p><small>拍摄：${r.time.captured_at?stamp(r.time.captured_at):'上传：'+stamp(r.time.uploaded_at)}${r.time.gap_seconds!==null?' · 相差 '+Math.round(r.time.gap_seconds/60)+' 分钟':''}</small></p>${r.time.timezone_note?`<small>${esc(r.time.timezone_note)}</small>`:''}<ul class="photo-checks">${rows.map(([label,item,rule])=>`<li><strong>${label} · ${photoStatuses[item.status]}</strong><small>要求：${esc(rule)}</small><p>${esc(item.reason)}</p>${item.evidence?`<small>可见依据：${esc(item.evidence)}</small>`:''}</li>`).join('')}</ul><small>${r.mode==='model'?'视觉初审 · '+esc(r.model):'视觉项待人工复核'} · 审核意见由确认人填写。</small></div></div>`;
+  return `<div class="photo-evaluation"><a href="/api/files/${file.id}"><img src="/api/files/${file.id}/preview" alt="${esc(file.name)}"></a><div><strong>${esc(file.reference)}</strong><small> · ${esc(file.name)}</small><p><small>拍摄：${r.time.captured_at?stamp(r.time.captured_at):'原图未提供可读时间'} · 上传：${stamp(r.time.uploaded_at)}${r.time.gap_seconds!==null?' · 相差 '+Math.round(r.time.gap_seconds/60)+' 分钟':''}</small></p>${r.time.timezone_note?`<small>${esc(r.time.timezone_note)}</small>`:''}<ul class="photo-checks">${rows.map(([label,item,rule])=>`<li><strong>${label} · ${photoStatuses[item.status]}</strong><small>要求：${esc(rule)}</small><p>${esc(item.reason)}</p>${item.evidence?`<small>可见依据：${esc(item.evidence)}</small>`:''}</li>`).join('')}</ul><small>${r.mode==='model'?'视觉初审 · '+esc(r.model):'视觉项待人工复核'} · 审核意见由确认人填写。</small></div></div>`;
 }
 function taskPhotoUpload(c,t){
   const template=templateFor(c);
   const standards=template.evidence.filter(s=>template.task_standards?.[t.id]?.includes(s.key));
   if(!standards.length)return '';
-  return `<form class="stack task-photo-form" data-photo-task="${esc(t.id)}"><h3>上传现场照片</h3><label>拍摄标准<select name="standard">${standards.map(s=>`<option value="${s.key}">${esc(s.label)}</option>`).join('')}</label><div class="notice photo-criteria"></div><label>部位与说明<input name="note" placeholder="例如：客厅入户门，材料包装标签近照" maxlength="85" required></label><label>拍照或选原图<input type="file" name="file" accept="image/jpeg,image/png" capture="environment" required></label><small>JPG / PNG，8 MB 以内。尽量使用相机原图，保留拍摄时间。</small><button>上传并初审</button></form>`;
+  return `<form class="stack task-photo-form" data-photo-task="${esc(t.id)}"><h3>上传现场照片</h3><label>拍摄标准<select name="standard">${standards.map(s=>`<option value="${esc(s.key)}">${esc(s.key)} · ${esc(s.label)}</option>`).join('')}</select></label><div class="notice photo-criteria"></div><label>部位与说明<input name="note" placeholder="例如：客厅入户门，材料包装标签近照" maxlength="85" required></label><label>拍照或选原图<input name="file" type="file" accept="image/jpeg,image/png" capture="environment" required></label><small>JPG / PNG，8 MB 以内。尽量使用相机原图，保留拍摄时间。</small><button>上传并初审</button></form>`;
 }
 function tasksPage(){
   const c=change();
@@ -465,8 +431,8 @@ function tasksPage(){
     const canUpload=!locked&&mine&&!blocked.length&&['ready','returned'].includes(t.status)&&c.status==='executing';
     const taskPhotos=files.filter(f=>f.task_id===t.id&&f.photo_review);
     const taskStatus={ready:blocked.length?'等待前置确认':'可开始',submitted:'等待确认',returned:'退回整改',approved:'已确认完成'}[t.status];
-    return `<section class="card task ${t.status}" id="review-task-${esc(t.id)}"><div class="row between"><h2>${esc(t.title)}</h2>${tag(taskStatus,t.status==='returned'?'red':'')}</div><p class="muted">执行人 ${esc(name(t.owner_id))} · 确认人 ${t.reviewer_ids.map(name).map(esc).join('、')} · 截止 ${esc(t.due)}</p><p class="details">交付物 · ${esc(t.output)}</p>${blocked.length?`<div class="notice warn">等待 ${blocked.map(id=>c.tasks.find(x=>x.id===id)?.title).map(esc).join('、')}</div>`:''}${locked?'<p class="notice">等待变更确认并发布</p>':''}${canUpload?taskPhotoUpload(c,t):''}${taskPhotos.length?`<details class="revision"><summary>查看逐张照片初审（${taskPhotos.length} 张）</summary>${taskPhotos.map(reviewedPhoto).join('')}</details>`:''}${t.submissions.map(s=>`<details class="revision"><summary>第 ${s.attempt} 次提交 · ${esc(s.by)}</summary><p>${esc(s.note)}</p><small>${stamp(s.at)}</small>${s.files.map(id=>`<p><a href="/api/files/${id}">${esc(state.project.files.find(f=>f.id===id)?.name||'查看证据')}</a></p>`).join('')}${t.reviews.filter(r=>r.attempt===s.attempt).map(r=>`<p>${esc(r.by)} · ${r.decision==='approve'?'确认通过':'退回整改'} · ${esc(r.note)}</p>`).join('')}</details>`).join('')}${canUpload?`<form data-task="${t.id}" class="stack"><label>完成情况<textarea name="note" required></textarea></label><div><label>关联已上传的施工留痕（照片可直接查看）</label>${files.length?files.map(f=>`<label class="check"><input type="checkbox" name="file_ids" value="${f.id}">${isPhoto(f.name)?`<img class="thumb" src="/api/files/${f.id}/preview" alt="">`:''}${esc(f.name)} · ${esc(f.reference||'')}</label>`).join(''):'<p class="muted">请先上传照片。</p>'}</div><button value="submit" ${files.length?'':'disabled'}>提交给确认人</button></form>`:''}${review&&t.status==='submitted'&&c.status==='executing'?`<form data-task="${t.id}" class="stack"><label>确认意见 / 退回原因<textarea name="note" required></textarea></label><div class="row"><button value="approve">确认本任务完成</button><button class="danger" value="return">退回整改</button></div></form>`:''}</section>`;
-  }).join('')}${c.status==='acceptance'?`<section class="card"><h2>最终人工验收</h2><p>请核对交付结果与已确认方案，并记录验收结论。</p>${revision(c).approvers.owner===state.user.id?'<form id="acceptForm" class="stack"><label>验收意见<textarea name="note" required></textarea></label><div class="row"><button value="approve">验收通过并关闭</button><button class="danger" value="return">退回整改</button></div></form>':`<p class="muted">等待 ${esc(name(revision(c).approvers.owner))} 确认。</p>`}</section>`:''}${c.status==='closed'?'<div class="notice">住户已确认本次交付。</div>':''}</div><div class="stack">${filePanel(c)}<section class="card"><h2>本次执行记录</h2>${eventsView(state.project.data.events.filter(e=>e.change_id===c.id).slice(-8))}</section></div></div>`}`;
+    return `<section class="card task ${t.status}" id="review-task-${esc(t.id)}"><div class="row between"><h2>${esc(t.title)}</h2>${tag(taskStatus,t.status==='returned'?'red':'')}</div><p class="muted">执行人 ${esc(name(t.owner_id))} · 确认人 ${t.reviewer_ids.map(name).map(esc).join('、')} · 截止 ${esc(t.due)}</p><p class="details">交付物 · ${esc(t.output)}</p>${blocked.length?`<div class="notice warn">等待 ${blocked.map(id=>c.tasks.find(x=>x.id===id)?.title).map(esc).join('、')}</div>`:''}${locked?'<p class="notice">等待变更确认并发布</p>':''}${canUpload?taskPhotoUpload(c,t):''}${taskPhotos.length?`<details class="revision"><summary>查看逐张照片初审（${taskPhotos.length} 张）</summary>${taskPhotos.map(reviewedPhoto).join('')}</details>`:''}${t.submissions.map(s=>`<details class="revision"><summary>第 ${s.attempt} 次提交 · ${esc(s.by)}</summary><p>${esc(s.note)}</p><small>${stamp(s.at)}</small>${s.files.map(id=>`<p><a href="/api/files/${id}">${esc(state.project.files.find(f=>f.id===id)?.name||'查看证据')}</a></p>`).join('')}${t.reviews.filter(r=>r.attempt===s.attempt).map(r=>`<p>${esc(r.by)} · ${r.decision==='approve'?'确认通过':'退回整改'} · ${esc(r.note)}</p>`).join('')}</details>`).join('')}${canUpload?`<form data-task="${t.id}" class="stack"><label>完成情况<textarea name="note" required></textarea></label><div><label>关联已上传的施工留痕（照片可直接查看）</label>${files.length?files.map(f=>`<label class="check"><input type="checkbox" name="file_ids" value="${f.id}">${isPhoto(f.name)?`<img class="thumb" src="/api/files/${f.id}/preview" alt="">`:''}${esc(f.name)} · ${esc(f.reference||'')}</label>`).join(''):'<p class="muted">请先在本任务上传现场照片。</p>'}</div><button value="submit" ${files.length?'':'disabled'}>提交给确认人</button></form>`:''}${review&&t.status==='submitted'&&c.status==='executing'?`<form data-task="${t.id}" class="stack"><label>确认意见 / 退回原因<textarea name="note" required></textarea></label><div class="row"><button value="approve">确认本任务完成</button><button value="return" class="danger">退回整改</button></div></form>`:''}</section>`;
+  }).join('')}${c.status==='acceptance'?`<section class="card"><h2>最终人工验收</h2><p>请核对交付结果与已确认方案，并记录验收结论。</p>${revision(c).approvers.owner===state.user.id?'<form id="acceptForm" class="stack"><label>验收意见<textarea name="note" required></textarea></label><div class="row"><button value="approve">验收通过并关闭</button><button value="return" class="danger">退回整改</button></div></form>':`<p class="muted">等待 ${esc(name(revision(c).approvers.owner))} 确认。</p>`}</section>`:''}${c.status==='closed'?'<div class="notice">住户已确认本次交付。</div>':''}</div><div class="stack">${filePanel(c)}<section class="card"><h2>本次执行记录</h2>${eventsView(state.project.data.events.filter(e=>e.change_id===c.id).slice(-8))}</section></div></div>`}`;
 }
 function membersPage(){
   return `<div class="page-head"><h1>成员与邀请</h1><p class="muted">邀请成员以各自身份加入，再把任务分派给具体的人。</p></div><div class="grid"><section class="card"><h2>项目参与方</h2>${state.project.members.map(m=>`<div class="file-row"><div><strong>${esc(m.name)}</strong><br><small>${esc(m.username)}</small></div>${tag(roles[m.role])}</div>`).join('')}</section>${state.user.role==='coordinator'?`<section class="card"><h2>邀请新成员</h2><form id="inviteForm" class="stack"><label>受邀身份<select name="role">${Object.entries(roles).map(([r,n])=>`<option value="${r}">${n}</option>`).join('')}</select></label><small>邀请三天内有效，可使用一次。</small><button>生成邀请</button></form><div id="inviteResult"></div></section>`:''}</div>`;
@@ -478,7 +444,7 @@ function demoBrief(c){
   const originalRequest=c.source.text;
   const legacyRequest='客厅和卧室从分区铺砖改成全屋通铺，选用 800×800 瓷砖。';
   const request=originalRequest===legacyRequest?'客厅和卧室的砖能不能连着铺？我想改成全屋通铺，换 800×800 的砖。会多花多少钱？原来约好的交付日还能赶上吗？':originalRequest;
-  return `<section class="card demo-brief"><div class="row between"><h2>演示案例 · 和光里全屋通铺</h2>${tag('合成案例','warn')}</div><div class="grid"><article><h3>原装修约定 · ${esc(original.reference)}</h3><p>${esc(original.text)}</p>${original.finish_date?`<p>原约定交付 <strong>${esc(original.finish_date)}</strong></p>`:''}</article><article><h3>${request===originalRequest?'住户变更原话':'住户变更 · 路演口播稿'}</h3><blockquote>${esc(request)}</blockquote><p>已确认的演示增项 <strong>${esc(revision(c).data.quote_amount)}</strong> 元</p></article></div><p><strong>接下来要解决的问题</strong> 原计划先复核基层，再铺砖。现场班组已经到场，却等不到设计师、项目经理和住户确认能否调序。为了避免当场窝工，有人先排了铺砖。这与基层复核撞班组，也可能把本来能在开铺前发现的问题拖到返工时。</p><div class="buttons"><button type="button" data-tab="changes" class="secondary">查看变更与各方确认</button>${state.user.role==='coordinator'&&c.status==='executing'?'<button type="button" id="briefScheduleDemo">检查错排草案</button>':''}</div></section>`;
+  return `<section class="card demo-brief"><div class="row between"><h2>演示案例 · 和光里全屋通铺</h2>${tag('合成案例','warn')}</div><div class="grid"><article><h3>原装修约定 · ${esc(original.reference)}</h3><p>${esc(original.text)}</p>${original.finish_date?`<p>原约定交付 <strong>${esc(original.finish_date)}</strong></p>`:''}</article><article><h3>${request===originalRequest?'住户变更原话':'住户变更 · 路演口播稿'}</h3><blockquote>${esc(request)}</blockquote><p>已确认的演示增项 <strong>${esc(revision(c).data.quote_amount)} 元</strong></p></article></div><p><strong>接下来要解决的问题</strong> 原计划先复核基层，再铺砖。现场班组已经到场，却等不到设计师、项目经理和住户确认能否调序。为了避免当场窝工，有人先排了铺砖。这与基层复核撞班组，也可能把本来能在开铺前发现的问题拖到返工时。</p><div class="buttons"><button type="button" data-tab="changes" class="secondary">查看变更与各方确认</button>${state.user.role==='coordinator'&&c.status==='executing'?'<button type="button" id="briefScheduleDemo">检查错排草案</button>':''}</div></section>`;
 }
 function kitchenImpact(c,result){
   const k=c.kitchen_change;
@@ -493,14 +459,14 @@ function kitchenImpact(c,result){
     return `<li>${esc(n.title)} · ${esc(old.start)} → ${esc(n.start)} · ${days>0?'+':''}${days} 天 · ${reason}</li>`;
   }).join('');
   const quote=state.project.files.find(f=>f.change_id===c.id&&f.reference===k.quote_reference);
-  return `<section class="card"><h2>厨房墙砖变更 · 影响对比</h2><p>${esc(k.request)} 新砖调整至 ${esc(k.new_arrival)} 到货。</p><h3>关键工序 · 原开始日与拟议开始日</h3><ul>${timing}</ul><h3>费用与核实人</h3><p>同范围材料报价 ${k.old_quote} → ${k.new_quote} 元，差额 <strong>+${k.new_quote-k.old_quote} 元</strong>。${quote?`<a href="/api/files/${quote.id}">报价 ${esc(k.quote_reference)}</a>`:''}</p><p>瓦工待工费 <strong>待核实</strong> · ${esc(name(k.cost_owner))}</p><p>建议：${esc(k.advice)} 原文依据「${esc(k.evidence)}」</p><h3>${k.applied?'确认结果':'确认分工'}</h3><p>${k.applied?'设计、施工和住户已确认，项目经理已发布新版排程。':`设计师 ${esc(name(k.drawing_owner))} 核对新版图纸，施工方核对到货和人员档期，住户核对费用。`}</p></section>`;
+  return `<section class="card"><h2>厨房墙砖变更 · 影响对比</h2><p>${esc(k.request)} 新砖调整至 ${esc(k.new_arrival)} 到货。</p><h3>关键工序 · 原开始日与拟议开始日</h3><ul>${timing}</ul><h3>费用与核实人</h3><p>同范围材料报价 ${k.old_quote} → ${k.new_quote} 元，差额 <strong>+${k.new_quote-k.old_quote} 元</strong>。${quote?`<a href="/api/files/${quote.id}">报价 ${esc(k.quote_reference)}</a>`:''}</p><p>瓦工待工费 <strong>待核实</strong> · ${esc(name(k.cost_owner))}</p><p>建议：${esc(k.advice)} 原文依据「${esc(k.evidence)}」。</p><h3>${k.applied?'确认结果':'确认分工'}</h3><p>${k.applied?'设计、施工和住户已确认，项目经理已发布新版排程。':`设计师 ${esc(name(k.drawing_owner))} 核对新版图纸，施工方核对到货和人员档期，住户核对费用。`}</p></section>`;
 }
 function noteAnalysis(c, initial){
   const previous=state.noteAnalysis?.changeId===c.id?state.noteAnalysis:null;
   const result=previous?.result;
   const items=(rows)=>`<ul class="list">${rows.map(item=>`<li><strong>${esc(item.finding)}</strong><p>可能影响：${esc(item.impact)}</p><p>处理建议：${esc(item.action)}</p><small>原文依据：${item.evidence.map(e=>'「'+esc(e)+'」').join(' ')}</small></li>`).join('')}</ul>`;
   return `<section class="notice"><form id="roadshowNote" class="stack" data-change-id="${esc(c.id)}"><label>待分析的变更说明或施工备注<textarea name="text" required maxlength="500">${esc(previous?.text||initial.slice(0,500))}</textarea></label><button>提取影响和建议</button></form>
-  ${result?`<div class="note-result" aria-live="polite"><strong>${result.mode==='model'?'AI 辅助分析':result.mode==='fallback'?'规则检查':'规则检查'}</strong>${result.items.length?items(result.items):'<p>这段文字没有明确的可核对事项。补上材料日期、班组安排或要改动的工序后可再分析。</p>'}${result.checks?.length?`<div><strong>规则复核</strong>${items(result.checks)}</div>`:''}</div>`:''}</section>`;
+  ${result?`<div class="note-result" aria-live="polite"><strong>${result.mode==='model'?'AI 辅助分析':result.mode==='fallback'?'模型未提供可用结果 · 规则检查':'规则检查'}</strong>${result.items.length?items(result.items):'<p>这段文字没有明确的可核对事项。补上材料日期、班组安排或要改动的工序后可再分析。</p>'}${result.checks?.length?`<div><strong>规则复核</strong>${items(result.checks)}</div>`:''}</div>`:''}</section>`;
 }
 function demoGuide(c,draft,proposal){
   if(!c.kitchen_change||!state.demoProfile)return '';
@@ -520,7 +486,7 @@ function demoGuide(c,draft,proposal){
   }else if(draft?.issues.length){
     const missingDrawing=draft.nodes.some(n=>n.id==='preparation'&&!n.included);
     title=missingDrawing?'厨房铺砖缺少新版图纸核验':'当前排程需要调整';
-    copy=missingDrawing?`核验负责人：${name(c.kitchen_change.drawing_owner)}。恢复核验后，再按新到货日安排铺砖。`:'新砖到货时间与原排程有冲突。按新到货日重新核对铺贴时间和班组安排。';
+    copy=missingDrawing?`核验负责人：${name(c.kitchen_change.drawing_owner)}。恢复核验后，再按新砖到货日安排铺砖。`:'新砖到货时间与原排程有冲突。按新到货日重新核对铺贴时间和班组安排。';
     action=missingDrawing?'恢复核验并查看新排程':'查看可行排程';key='repair';
   }else if(draft){
     title='新排程可以提交确认';
@@ -559,27 +525,24 @@ function schedulePage(){
   const table=(nodes,edit=false)=>`<div class="table-wrap schedule-table"><table><thead><tr><th>节点 / 负责人</th><th>开始</th><th>天数</th><th>班组</th><th>前置节点</th><th>保留</th></tr></thead><tbody>${nodes.map(n=>{
     const key=esc(n.id), fixed=view.locked.includes(n.id), disabled=fixed?'disabled':'';
     const cell=(kind,prop,value)=>edit?`<input type="${kind}" name="${prop}-${key}" value="${esc(value)}" ${kind==='number'?'min="1" max="365"':kind==='text'?'maxlength="60"':''} ${disabled} aria-label="${esc(n.title)} ${prop}" required>`:esc(value||'—');
-    return `<tr><td><strong>${esc(n.title)}</strong><br><small>${esc(n.owner_id?name(n.owner_id):'中介协调')} · ${fixed?'已有交付记录':n.optional?'可调整节点':'必需节点'}</small></td><td>${cell('date','start',n.start)}</td><td>${cell('number','days',n.days)}</td><td>${edit?`<input name="crew-${key}" maxlength="60" value="${esc(n.crew)}" ${disabled} aria-label="${esc(n.title)} 班组">`:esc(n.crew||'未指定')}</td><td>${edit?nodes.filter(d=>d.id!==n.id&&(n.optional||!d.optional)).map(d=>`<label class="check"><input type="checkbox" name="deps-${key}" value="${d.id}" ${n.deps.includes(d.id)?'checked':''} ${disabled}>${esc(d.title)}</label>`).join(''):esc(n.deps.map(d=>nodes.find(x=>x.id===d)?.title||d).join('、')||'—')}</td><td>${edit?`<input type="checkbox" name="include-${key}" aria-label="保留 ${esc(n.title)}" ${n.included?'checked':''} ${disabled}>`:n.included?'保留':'移出'}</td></tr>`;
+    return `<tr><td><strong>${esc(n.title)}</strong><br><small>${esc(n.owner_id?name(n.owner_id):'中介协调')} · ${fixed?'已有交付记录':n.optional?'可调整节点':'必需节点'}</small></td><td>${cell('date','start',n.start)}</td><td>${cell('number','days',n.days)}</td><td>${edit?`<input name="crew-${key}" maxlength="60" value="${esc(n.crew)}" ${disabled} aria-label="${esc(n.title)} 班组">`:esc(n.crew||'未指定')}</td><td>${edit?nodes.filter(d=>d.id!==n.id&&(n.optional||!d.optional)).map(d=>`<label class="check"><input type="checkbox" name="deps-${key}" value="${esc(d.id)}" ${n.deps.includes(d.id)?'checked':''} ${disabled}>${esc(d.title)}${n.required_deps.includes(d.id)?'（必需）':''}</label>`).join(''):esc(n.deps.map(d=>nodes.find(x=>x.id===d)?.title||d).join('、')||'—')}</td><td>${edit?`<input type="checkbox" name="include-${key}" aria-label="保留 ${esc(n.title)}" ${n.included?'checked':''} ${disabled}>`:n.included?'保留':'移出'}</td></tr>`;
   }).join('')}</tbody></table></div>`;
-  const proposalPanel=proposal?`<section class="card"><h2>最近一次排程提案 · ${esc(({pending:'待确认',returned:'已退回',published:'已发布',superseded:'已替换'})[proposal.status])}</h2><p>${esc(proposal.note)}</p>${metrics(proposal.result.metrics)}${table(proposal.result.nodes)}<ul>${Object.entries(proposal.approvers).map(([k,id])=>{const opinion=proposal.decisions[k];return `<li>${esc(name(id))} · ${esc(kinds[k])} · ${opinion?esc((opinion.decision==='approve'?'已确认：':'已退回：')+opinion.note):'待确认'}</li>`;}).join('')}</ul>${myRole&&!proposal.decisions[myRole]?`<form id="scheduleDecision" class="stack"><label>确认意见<textarea name="note" required maxlength="500"></textarea></label><div class="buttons"><button value="approve">确认调整</button><button class="danger" value="return">退回调整</button></div></form>`:''}${editable&&pending?`<button id="schedulePublish" ${Object.keys(proposal.decisions).length===Object.keys(proposal.approvers).length?'':'disabled'}>发布调整后的排程</button>`:''}</section>`:'';
+  const proposalPanel=proposal?`<section class="card"><h2>最近一次排程提案 · ${esc(({pending:'待确认',returned:'已退回',published:'已发布',superseded:'已替换'})[proposal.status])}</h2><p>${esc(proposal.note)}</p>${metrics(proposal.result.metrics)}${table(proposal.result.nodes)}<ul>${Object.entries(proposal.approvers).map(([k,id])=>{const opinion=proposal.decisions[k];return `<li>${esc(name(id))} · ${esc(kinds[k])} · ${opinion?esc((opinion.decision==='approve'?'已确认：':'已退回：')+opinion.note):'待确认'}</li>`;}).join('')}</ul>${myRole&&!proposal.decisions[myRole]?`<form id="scheduleDecision" class="stack"><label>确认意见<textarea name="note" required maxlength="500"></textarea></label><div class="buttons"><button value="approve">确认调整</button><button value="return" class="danger">退回调整</button></div></form>`:''}${editable&&pending?`<button id="schedulePublish" ${Object.keys(proposal.decisions).length===Object.keys(proposal.approvers).length?'':'disabled'}>发布调整后的排程</button>`:''}</section>`:'';
   const timing=draft?draft.nodes.filter(n=>n.included).map(n=>{
     const old=draft.base.nodes.find(x=>x.id===n.id);
     const days=Math.round((Date.parse(n.start)-Date.parse(old.start))/86400000);
-    return '<li>'+esc(n.title)+' · '+esc(old.start)+' → '+esc(n.start)+' · '+(days>0?'+':'')+days+'</li>';
+    return '<li>'+esc(n.title)+' · '+esc(old.start)+' → '+esc(n.start)+' · '+(days>0?'+':'')+days+' 天</li>';
   }).join(''):'';
-  const comparison=draft?`<section class="card schedule-comparison"><h2>对比结果</h2>${editable?'<button id="scheduleSave" class="secondary">保留草稿</button>':''}<div class="grid"><div><h3>当前正式计划</h3>${metrics(draft.base_metrics)}</div><div><h3>拟调整排程</h3>${draft.issues.length?'<p class="warn">存在冲突，下列日期为草案推算。</p>':''}${metrics(draft.metrics)}</div></div>${c.kitchen_change?'':'<h3>关键工序日期</h3><ul>'+timing+'</ul>'}${conflicts(draft)}${draft.affected.length?`<p>受影响：${draft.affected.map(n=>esc(n.title)+'（'+esc(n.owner_id?name(n.owner_id):'中介协调')+'）').join('、')}</p>`:''}${draft.alternative?`<h3>候选排程</h3>${metrics(draft.alternative.metrics)}${saving(draft.base_metrics,draft.alternative.metrics)}${table(draft.alternative.nodes)}<button id="scheduleUse" class="secondary">采用候选排程</button>`:'<p>目前无法排出满足约束的候选，请调整前置条件。</p>'}${editable&&(!draft.issues.length||c.kitchen_change)?`<form id="schedulePropose" class="stack"><label>调整原因<textarea name="note" required maxlength="500"></textarea></label><button>${draft.issues.length?'尝试发布 · 检查前置条件':'提交各方确认'}</button></form>`:''}</section>`:'';
+  const comparison=draft?`<section class="card schedule-comparison"><h2>对比结果</h2>${editable?'<button id="scheduleSave" class="secondary">保留草稿</button>':''}<div class="grid"><div><h3>当前正式计划</h3>${metrics(draft.base_metrics)}</div><div><h3>拟调整排程</h3>${draft.issues.length?'<p class="warn">存在冲突，下列日期为草案推算。</p>':''}${metrics(draft.metrics)}</div></div>${c.kitchen_change?'':'<h3>关键工序日期</h3><ul>'+timing+'</ul>'}${conflicts(draft)}${draft.affected.length?`<p>受影响：${draft.affected.map(n=>esc(n.title)+'（'+esc(n.owner_id?name(n.owner_id):'中介协调')+'）').join('、')}</p>`:''}${draft.alternative?`<h3>候选排程</h3>${metrics(draft.alternative.metrics)}${saving(draft.base_metrics,draft.alternative.metrics)}${table(draft.alternative.nodes)}<button id="scheduleUse" class="secondary">采用候选排程</button>`:'<p>目前无法排出满足约束的候选，请调整前置条件和班组。</p>'}${editable&&(!draft.issues.length||c.kitchen_change)?`<form id="schedulePropose" class="stack"><label>调整原因<textarea name="note" required maxlength="500"></textarea></label><button>${draft.issues.length?'尝试发布 · 检查前置条件':'提交各方确认'}</button></form>`:''}</section>`:'';
   const full=`<div class="page-head"><h1>工期与排程</h1><p class="muted">查看节点删减或调序对交付、班组和费用的影响。</p></div>${changeToolbar()}<div class="stack">${c.kitchen_change?kitchenImpact(c,draft||proposal?.result):demoBrief(c)}<section class="card"><h2>当前正式排程 · v${view.base.number}</h2>${view.base.inferred?'<p class="notice">旧案例按任务截止日暂列为一天，尚未录入实际班组。请先核对工期输入。</p>':''}${table(view.base.nodes)}${c.kitchen_change&&!c.kitchen_change.applied?'':conflicts(view)}</section>${editable?`<section class="card"><h2>拟定调整</h2><form id="scheduleDraft" class="stack">${table(rows,true)}<div class="fields"><label>延期估算（元 / 天）<input type="number" name="delay" min="0" max="1000000" value="${draft?.fees.delay??''}"></label><label>班组空档估算（元 / 班组日）<input type="number" name="idle" min="0" max="1000000" value="${draft?.fees.idle??''}"></label></div><small>空档为同一班组在本单第一项到最后一项之间未排任务的日数。费用按输入费率估算，留空不估算。</small><div class="buttons"><button>检查并对比</button>${state.project.data.synthetic&&!c.kitchen_change?'<button type="button" id="scheduleExample" class="secondary">填入调序冲突示例</button>':''}</div></form></section>`:''}${comparison}${proposalPanel}</div>`;
   const guide=demoGuide(c,draft,proposal);
   return guide?`<div class="page-head"><h1>厨房墙砖变更</h1><p class="muted">业主提出更换厨房墙砖，新砖比原计划晚到两天。</p></div>${guide}<details class="revision guide-details" ${draft?.issues.length?'open':''}><summary>查看排程、报价和确认记录</summary>${full}</details>`:full;
 
 }
 function render(){
-  if(!state.user&&state.demo?.available&&!location.hash.startsWith('#join=')){
-    $('#app').innerHTML=openingPage();
-    bind();
-    return;
+  if(state.showOpening||!state.user){
+    $('#app').innerHTML=openingPage();bindOpening();return;
   }
-  if(!state.user){$('#app').innerHTML=openingPage();bind();return;}
   let content;
   if(state.project&&!state.roadshow&&state.user.role!=='mediator'){
     const cases=state.project.data.changes.filter(c=>c.collaboration);
@@ -594,18 +557,20 @@ function render(){
   else content=overview();
   $('#app').innerHTML=shell(content);bind();
   if(state.demo?.available){
-    $('.sidebar-footer').insertAdjacentHTML('afterend',`<details class="demo-switch"><summary>${state.demoProfile?'切换身份':'演示身份'}</summary><div class="demo-role-grid">${demoRoleButtons()}</div></details>`);
+    if(!location.hash.startsWith('#join='))$('#logout').hidden=true;
+    $('.sidebar>div').insertAdjacentHTML('afterend',roleDirectory());
+    $('[data-return-opening]').onclick=()=>{state.showOpening=true;render();window.scrollTo(0,0);};
     bindDemoRoles();
   }
 }
 async function enterDemo(role, initial=false){
-  state.roadshow=true;
+  state.roadshow=state.roadshow||new URLSearchParams(location.search).get('show')==='1';
   const result=await post('/api/demo-login',{role});
   const same=Boolean(result.demo_project_id)&&state.project?.id===result.demo_project_id;
-  const tab=same?state.tab:initial?'overview':'changes';
+  const tab=same?state.tab:initial?'schedule':'changes';
   const changeId=same?state.changeId:null;
   Object.assign(state,{user:result.user,csrf:result.csrf,project:null,changeId,tab,demoProfile:true,dirty:false});
-  history.replaceState(null,'',location.pathname);
+  history.replaceState(null,'',location.pathname+(state.roadshow?'?show=1':''));
   const project=result.demo_project_id?await api('/api/projects/'+result.demo_project_id):await post('/api/projects/demo',{});
   state.demo.ready=true;
   if(initial)state.changeId=project.data.changes.find(c=>c.kitchen_change)?.id||state.changeId;
@@ -644,8 +609,9 @@ async function openTaskPhoto(){
     form.querySelector('[name=file]').focus({preventScroll:true});
   }else{
     const c=change();
+    const own=c.tasks.filter(t=>t.owner_id===state.user.id);
     if(c.schedule_task_locks?.length)notify('请先在「工期与排程」完成变更确认并发布。');
-    else if(c.tasks.some(t=>t.status==='submitted'))notify('该任务已提交，确认人退回后可以补传照片。');
+    else if(own.some(t=>t.status==='submitted'))notify('该任务已提交，确认人退回后可以补传照片。');
     else notify('当前没有可上传的任务。请查看责任人和前置条件。');
     window.scrollTo(0,0);
   }
@@ -675,7 +641,7 @@ function bindExamples(){
       if(form.querySelector('[value=approve]'))samples.push([approval,'填入确认示例']);
       if(form.querySelector('[value=return]'))samples.push(['请先补充墙砖的样品、差价和到货日期，核对后再确认。','填入退回示例']);
       if(form.querySelector('[value=revise]'))samples.push([
-        material?'厨房改用同规格米白砖，客厅照旧；到货日及差价以新报价为准。':'仅调整厨房墙砖颜色，客厅照旧；开工前核对样品和到货日期。',
+        material?'厨房改用同规格米白墙砖，客厅照旧；到货日及差价以新报价为准。':'仅调整厨房墙砖颜色，客厅照旧；开工前核对样品和到货日期。',
         '填入修订示例']);
     }else if(form.id==='simplePhoto'){
       samples=[['厨房墙砖到货，拍摄包装标签与规格。','填入示例']];
@@ -708,23 +674,6 @@ function fillExample(input,text){
   input.setSelectionRange(input.value.length,input.value.length);
 }
 function bind(){
-  document.querySelectorAll('[data-enter-product]').forEach(button=>button.onclick=()=>enterProduct(button));
-  if($('#retryConnection'))$('#retryConnection').onclick=()=>boot();
-  document.querySelectorAll('[data-entry-role]').forEach(button=>button.onclick=()=>{
-    state.entryRole=button.dataset.entryRole;
-    document.querySelectorAll('[data-entry-role]').forEach(x=>{
-      const active=x===button;x.setAttribute('aria-pressed',String(active));
-      x.querySelector('.role-check').textContent=active?'✓':'↗';
-    });
-    $('#entry-role-hint').textContent=`以${entryRoleNames[state.entryRole]}视角进入，同一份案例、同一份记录。`;
-  });
-  document.querySelectorAll('[data-entry-stage]').forEach(button=>button.onclick=()=>{
-    state.entryStage=Number(button.dataset.entryStage);
-    const item=entryStages[state.entryStage];
-    document.querySelectorAll('[data-entry-stage]').forEach(x=>x.setAttribute('aria-pressed',String(x===button)));
-    $('#entry-stage-title').textContent=item.title;$('#entry-stage-text').textContent=item.text;$('#entry-stage-note').textContent=item.note;
-    if(!matchMedia('(prefers-reduced-motion: reduce)').matches)$('.opening-flow-note').animate([{opacity:.5,transform:'translateY(5px)'},{opacity:1,transform:'translateY(0)'}],{duration:200,easing:'ease-out'});
-  });
   bindExamples();
   document.querySelectorAll('[data-translate]').forEach(button=>button.onclick=()=>busy(button,async()=>{
     const output=button.parentElement.querySelector('[data-translation-result]');
@@ -757,7 +706,7 @@ function bind(){
     form.onsubmit=event=>{
       event.preventDefault();
       busy(event.submitter,()=>submitSiteIssue(form.dataset.changeId,new FormData(form).get('note'),form.dataset.siteIssue));
-    }
+    };
   });
   document.querySelectorAll('[data-schedule-change]').forEach(button=>button.onclick=()=>{
     state.changeId=button.dataset.scheduleChange;state.tab='schedule';render();
@@ -786,6 +735,8 @@ function bind(){
     event.preventDefault();
     document.getElementById('review-task-'+link.dataset.reviewTask)?.scrollIntoView({block:'start'});
   });
+  if($('#accountLogin'))$('#accountLogin').onclick=()=>{state.accountLogin=true;render();};
+  document.querySelectorAll('[data-auth]').forEach(button=>button.onclick=()=>{state.register=button.dataset.auth==='register';render();});
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{
     state.tab=button.dataset.tab;
     if(change()?.refund&&['schedule','tasks'].includes(state.tab)){
@@ -796,8 +747,14 @@ function bind(){
     window.scrollTo(0,0);
   });
   document.querySelectorAll('form').forEach(form=>form.addEventListener('input',()=>{state.dirty=true;}));
+  bindForm('#authForm',async form=>{
+    const result=await post(state.register?'/api/register':'/api/login',Object.fromEntries(form));
+    state.user=result.user;state.csrf=result.csrf;state.dirty=false;state.demoProfile=false;
+    await refreshProjects();
+    if(state.projects.length&&!location.hash.startsWith('#join='))await selectProject(state.projects[0].id);else render();
+  });
   if(!state.user)return;
-  $('#logout').onclick=()=>busy($('#logout'),async()=>{await post('/api/logout',{});Object.assign(state,{user:null,project:null,projects:[],csrf:'',demoProfile:false});render();});
+  $('#logout').onclick=()=>busy($('#logout'),async()=>{await post('/api/logout',{});Object.assign(state,{user:null,project:null,projects:[],csrf:'',accountLogin:false,demoProfile:false});render();});
   $('#projectSelect').onchange=e=>busy(null,()=>selectProject(e.target.value));
   $('#refresh').onclick=()=>busy($('#refresh'),async()=>{await refreshProjects();if(state.project)await selectProject(state.project.id);else render();});
   if($('#openDemo'))$('#openDemo').onclick=()=>busy($('#openDemo'),async()=>{
@@ -931,7 +888,7 @@ function bindSchedule(){
       if(!draft.alternative)throw new Error('暂时没有可行排程，请展开查看冲突。');
       await preview(draft.alternative.nodes,draft.fees);
     }else if(action==='submit'){
-      await write('propose',{nodes:draft.nodes,fees:draft.fees,note:'恢复新版图纸核验，按新到货日调整施工。'});
+      await write('propose',{nodes:draft.nodes,fees:draft.fees,note:'恢复新版图纸核验，按新砖到货日调整施工。'});
     }else if(action==='confirm'){
       await write('decide',{proposal_id:proposal.id,decision:'approve',note:'已核对当前演示版本与本方条件。'});
     }else if(action==='switch'){
@@ -966,26 +923,28 @@ function bindSchedule(){
   bindForm('#schedulePropose',async form=>{
     if(state.dirty&&$('#scheduleDraft')?.dataset.changed==='yes')throw new Error('排程输入已修改，请重新检查并对比。');
     await write('propose',{nodes:draft.nodes,fees:draft.fees,note:form.get('note')});
-    notify('调整方案已提交给确认人。');
+    notify('调整方案已提交给指定确认人。');
   });
   bindForm('#scheduleDecision',async(form,e)=>write('decide',{proposal_id:proposal.id,note:form.get('note'),decision:e.submitter.value}));
   if($('#schedulePublish'))$('#schedulePublish').onclick=()=>busy($('#schedulePublish'),async()=>{
     await write('publish',{proposal_id:proposal.id});
-    notify('正式排期与任务截止日已更新。');
+    notify('正式排程与任务截止日已更新。');
   });
 }
 function showRefresh(){state.pending=true;const button=$('#refresh');if(button)button.textContent='有更新，点击刷新';}
 async function boot(){
-  try{state.demo=await api('/api/demo-access');}catch{state.demo={available:false,ready:false};}
-  state.roadshow=true;
-  if(state.demo?.ready){
+  try{state.demo=await api('/api/demo-access');}catch{}
+  if(state.demo?.available&&!location.hash.startsWith('#join=')){
     try{
-      const result=await api('/api/me');
-      state.user=result.user;state.csrf=result.csrf;state.demoProfile=result.demo_profile;
-      await refreshProjects();
-      if(state.projects.length){await selectProject(state.projects[0].id);return;}
-    }catch{state.user=null;}
+      await enterDemo('coordinator',true);
+    }catch(error){
+      state.user=null;
+      render();
+      notify(error.message);
+    }
+    return;
   }
+  try{const result=await api('/api/me');state.roadshow=new URLSearchParams(location.search).get('show')==='1';state.user=result.user;state.csrf=result.csrf;state.demoProfile=result.demo_profile;await refreshProjects();if(state.projects.length&&!location.hash.startsWith('#join=')){await selectProject(state.projects[0].id);return;}}catch{}
   render();
 }
 setInterval(async()=>{

@@ -19,3 +19,16 @@ dialog.addEventListener('close', () => {
   scene.replaceChildren();
   if (opener?.isConnected) opener.focus();
 });
+// Native directory controls keep the original role-switch handler untouched.
+document.addEventListener('pointerdown', event => {
+  document.querySelectorAll('.role-directory[open]').forEach(menu => {
+    if (!menu.contains(event.target)) menu.open = false;
+  });
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  document.querySelectorAll('.role-directory[open]').forEach(menu => {
+    menu.open = false;
+    menu.querySelector('summary').focus();
+  });
+});

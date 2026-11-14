@@ -1,27 +1,39 @@
-# 共序·港乡：直接体验与交互开场
+# 共序·港乡：保留原产品，只增加黑白开场与角色目录
 
-默认入口改为交互开场，不再出现登录注册表单。产品名、页面标题、共享协议单和启动提示统一为「共序·港乡」。按 UI/UX Pro Max 的层级、留白、可读性和减少动态效果建议保持蓝白视觉。
+## 本次还原的基准
 
-## 开场与产品功能
+以仓库 `b6af43d`（新增暖棕/蓝白主题之前）的前端作为原产品基准。两个参考站点在云环境仍返回网络策略 403，因此不声称已逐项查看实时网站。
 
-- 可点击「需求、方案、共识、交付」四个步骤查看说明；不是自动轮播，不阻止进入产品。
-- 可先选项目经理、住户、设计师或施工团队；首次选择非经理身份时，后台自动准备同一份四方案例，不要求用户先注册经理账号。
-- 点击「进入协作现场」或「跳过开场，直接进入」进入原有产品工作区；四种身份和项目总览、排程、协商、施工照片、成员、记录入口保持可用。
-- 刷新沿用已有浏览器的身份与案例；「返回开场」回到身份选择，不删除案例。
-- 本地材质图为生成示意，页面标注「非项目现场」，不得作为施工照片证据。
-- 两个外部参考站点在当前环境均被网络策略拦截（403）；实现基于用户给出的简洁交互、蓝白材质和保留功能要求，未声称逐项复刻原站。
+恢复原版角色页面、组件布局和全部业务表单。默认访问不再强制设置 `state.roadshow=true`，不再把原来的角色产品替换为六个入口的完整工作台。
+
+- 住户：原来的「我的装修」，发起变更、住户确认及原有照片/记录。
+- 设计师：原来的「设计确认」与专业确认表单。
+- 施工团队：原来的「施工确认」、材料变更和现场照片上传。
+- 中介方：原来的成员与邀请页面。
+- 原有显式 `?show=1` 路演模式仍按原逻辑提供总览、排程、协商、任务、成员与记录，不改变其跳转方式。
+
+原版 `api`、`post`、`busy`、`setProject`、`field`、`collaborationPage`、`changesPage`、`tasksPage`、`membersPage`、`schedulePage`、`enterDemo`、`bindDemoRoles`、`bind`、`bindSchedule` 和 `boot` 已核对与基准一致（仅产品名统一为「共序·港乡」）。本次没有修改服务器、业务规则或数据库。
+
+## 仅新增的界面层
+
+1. 一个可跳过的黑白开场，目录内选择身份即调用原有角色切换。
+2. 页面内紧凑的「目录」替代原身份切换控件的外观；仍调用原来的 `bindDemoRoles` / `enterDemo`。可返回开场，不清空项目和进度。
+3. 原版组件 CSS 保留尺寸、排列及断点，仅将颜色改为黑白灰，去除彩色渐变。仅对原成员列表的长 ID 增加换行，防止手机溢出。
+4. 开场材质图灰度显示。真实施工照片保留原色，避免改变人工核对的证据。
+
+UI/UX Pro Max 用于检查视觉层级、可读性、键盘操作和减少动态效果；没有用检索建议替换原产品结构。
 
 ## Swarm Rebuild
 
-真实使用 `swarm-rebuild@0.2.4` 官方 ESM 构建。仅在用户主动打开协作说明并点击播放后运行，光标限制为单色。动效在独立同源示意页面内运行，不覆盖实际业务页面。关闭或播放完成后销毁；系统要求减少动态效果时只显示静态说明。
+继续使用官方 `swarm-rebuild@0.2.4` ESM 构建及 MIT 许可，位于 `static/vendor/swarm-rebuild/`。仅「播放协作开场」中的主动播放使用动效；单色呈现、不自动滚动、不覆盖业务操作，关闭和完成后销毁。启用减少动态效果时显示静态说明。
 
-代码与 MIT 许可在 `static/vendor/swarm-rebuild/`；来自 https://github.com/MaximeBoulle/Swarm-Rebuild 。下载包已核验 npm SHA-512：
+npm 包的 SHA-512 已核验：
 
 ```
 sha512-qktBNuvOn3mWNv2ZMwJ4sZe/tfaqFOiCIVYU56VKAu3GRFCfmTud0w2mScjJXF5Ofyj/8oyyQLsgs3diColNKA==
 ```
 
-只有 `/static/collaboration-scene.html` 允许同源嵌入与引擎所需的内联样式；该示意页禁止网络连接、表单和非同源嵌入，主应用 CSP 保持严格。
+同源示意页的专用 CSP 保留，主应用安全策略不变。
 
 ## 验证
 
@@ -32,20 +44,18 @@ node --check static/motion.js
 node --check static/collaboration-scene.js
 ```
 
-现有业务规则、权限、版本冲突、任务、照片与验收测试保持运行。新增测试覆盖公开直接体验的 HTTPS/域名校验、禁用账号入口及浏览器案例隔离。
-
-实际浏览器回归需要已有 Playwright 和 `/usr/bin/chromium`，必须对临时数据目录运行：
+浏览器回归必须使用临时数据库，会创建合成案例、确认变更并上传测试照片：
 
 ```sh
-TASKFLOW_HOST=127.0.0.1 TASKFLOW_PORT=18777 TASKFLOW_DEMO_ACCESS=1 TASKFLOW_KITCHEN_DEMO=1 TASKFLOW_DATA_DIR=/tmp/gangxiang-ui-check .venv/bin/python server.py
+TASKFLOW_HOST=127.0.0.1 TASKFLOW_PORT=18777 TASKFLOW_KITCHEN_DEMO=1 TASKFLOW_DATA_DIR=/tmp/gangxiang-ui-check .venv/bin/python server.py
 ```
 
-另一个终端执行：
+另一终端（需已安装 Playwright 和 `/usr/bin/chromium`）：
 
 ```sh
 python3 tests/ui_smoke.py --app-url http://127.0.0.1:18777 --artifacts-dir /tmp/gangxiang-ui-artifacts
 ```
 
-覆盖四个开场步骤、无密码表单、住户先进入、四种身份共用一个案例、六个业务页、375/768/1440 宽度、Swarm 加载与关闭、焦点恢复、Escape、减少动态效果、刷新、返回开场及不同浏览器的案例隔离。截图保存在指定目录。脚本会创建合成案例，不要指向实际业务数据。
+覆盖原版四种角色页面、默认模式没有被强制切换、住户发起变更 → 设计与施工确认 → 住户同意 → 施工方上传照片的实际操作、原显式路演模式的六个页面，以及目录、返回开场、375/768/1440 布局、动效、Escape、焦点恢复和减少动态效果。
 
-Windows 启动脚本已检查完整解压的 `requirements.txt`，避免只从 ZIP 内启动而缺少依赖清单。Linux 和容器的真实启动已独立验证；Windows 脚本需在 Windows 上执行。
+下载新版必须先关闭旧启动窗口、完整解压 ZIP，再运行 `start.cmd`，避免继续看到旧进程提供的页面。
