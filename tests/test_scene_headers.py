@@ -49,6 +49,9 @@ class DirectPublicPreviewTest(unittest.TestCase):
         }):
             client = create_app(directory, demo_access=True).test_client()
             base = 'https://preview.example'
+            health = client.get('/api/health', base_url='http://127.0.0.1:8774')
+            self.assertEqual(health.status_code, 200)
+            self.assertEqual(health.get_json(), {'ok': True})
             status = client.get('/api/demo-access', base_url=base)
             self.assertTrue(status.get_json()['available'])
             login = client.post('/api/demo-login', base_url=base, json={'role': 'coordinator'})

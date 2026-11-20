@@ -113,6 +113,8 @@ def create_app(data_dir=None, demo_access=False):
 
     @app.before_request
     def authenticate():
+        if request.endpoint == 'health':
+            return
         if public_demo_host:
             rules.check(request.host == public_demo_host and request.is_secure,
                         '请使用展台的 HTTPS 链接。',403)
@@ -123,7 +125,7 @@ def create_app(data_dir=None, demo_access=False):
         if request.method not in ('GET', 'HEAD', 'OPTIONS'):
             origin = request.headers.get('Origin')
             rules.check(not origin or origin == request.host_url.rstrip('/'), '请求来源不匹配。', 403)
-        if request.path in ('/api/register', '/api/login', '/api/health', '/api/demo-access', '/api/demo-login'):
+        if request.path in ('/api/register', '/api/login', '/api/demo-access', '/api/demo-login'):
             return
         token = request.cookies.get('taskflow_session', '')
         row = db().execute('SELECT u.id,u.name,u.username,u.role,s.csrf FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires>?',
